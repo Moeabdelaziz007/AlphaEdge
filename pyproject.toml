@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alphaedge"
+version = "0.1.0"
+description = "A localized, zero-cost, privacy-first edge AI architecture utilizing Cognitive Context Switching."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Mohamed H Abdelaziz"}
+]
+dependencies = [
+    "llama-cpp-python>=0.2.77",
+    "sqlite-vec>=0.1.1",
+    "pydantic>=2.0",
+    "typing-extensions>=4.5.0",
+    "rich>=13.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1.0",
+    "black>=23.0"
+]
