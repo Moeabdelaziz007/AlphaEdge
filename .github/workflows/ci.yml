@@ -1,0 +1,35 @@
+name: AlphaEdge CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  code-health:
+    name: Edge Codebase Integrity
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        cache: 'pip'
+
+    - name: Install Security & Linting Tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 bandit
+
+    - name: Syntax & Structural Logic Check (Flake8)
+      run: |
+        # Stop build if FATAL Python syntax errors or uninitialized variables exist
+        flake8 src api scripts --count --select=E9,F63,F7,F82 --show-source --statistics
+
+    - name: Sovereign Cloud-Defiant Security Audit (Bandit)
+      run: |
+        # Explicit check to ensure no hardcoded cloud API keys or vulnerable network calls leak into our offline Edge framework
+        bandit -r src/ api/ -ll -q

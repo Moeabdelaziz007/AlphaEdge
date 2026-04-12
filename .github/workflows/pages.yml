@@ -1,0 +1,40 @@
+name: Deploy AlphaEdge UI/UX Landing Page
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "ui-pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy-glassmorphism-cyber-ui:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout AlphaEdge Repository
+        uses: actions/checkout@v4
+
+      - name: Configure GitHub Pages CDN
+        uses: actions/configure-pages@v5
+
+      - name: Upload UI Artifacts
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './docs'
+
+      - name: Deploy Edge UI to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
