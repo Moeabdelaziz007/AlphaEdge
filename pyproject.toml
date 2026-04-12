@@ -20,7 +20,13 @@ dependencies = [
     "rich>=13.0.0",
     "huggingface_hub>=0.20.0",
     "fastapi>=0.110.0",
-    "uvicorn>=0.27.0"
+    "uvicorn>=0.27.0",
+    "SpeechRecognition>=3.10.0",
+    "pyaudio>=0.2.14",
+    "torch>=2.0.0",
+    "transformers==4.51.3",
+    "diffusers>=0.26.0",
+    "librosa>=0.10.0"
 ]
 
 [project.optional-dependencies]
