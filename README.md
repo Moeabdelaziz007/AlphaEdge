@@ -13,9 +13,13 @@ _____  |  | ______ |  |__ _____   \_   _____/|   | ____   ____
 
 Welcome to **alphaEdge**. In an era where Artificial Intelligence heavily relies on giant cloud infrastructures, **alphaEdge** redefines intelligence at the edge. Our architecture tackles the "Cognitive Bottleneck" not by bloating memory with massive models, but through **Cognitive Context Switching**.
 
-We rely entirely on Local/Edge AI (using lightweight 1B to 3B parameter models in GGUF format) and avoid any dependence on cloud services, ensuring absolute privacy, zero latency, and $0 cost.
+Inspired by Google's latest **TurboQuant** paradigm (ICLR 2026), our engine addresses the final hurdle of edge computing: the KV Cache Bottleneck. By compressing the model's short-term memory (KV cache) locally, we massively accelerate contextual awareness. 
 
-مرحباً بك في **alphaEdge**. هذا المشروع يحل "عنق الزجاجة الإدراكي" للأجهزة الطرفية (Edge Devices) بتكلفة صفرية، وبدون أي اعتماد على الخدمات السحابية لضمان الخصوصية المطلقة. نعتمد على استراتيجية "التبديل الإدراكي للسياق" باستخدام نماذج محلية خفيفة، حيث يتم تغيير الـ System Prompts وحالة الذاكرة برمجياً دون الحاجة لتحميل نماذج ضخمة.
+This enables a lightning-fast dual-memory system:
+1. **Short-term Memory (TurboQuant-style KV Quantization):** Allows huge context handling in active memory without OOM crashes.
+2. **Long-term Memory (sqlite-vec):** Fast local vector archives to store logic, code, and persona.
+
+مرحباً بك في **alphaEdge**. هذا المشروع يحل "عنق الزجاجة الإدراكي" للأجهزة الطرفية (Edge Devices) بتكلفة صفرية وبدون سحابة. بالاعتماد على المبادئ الهندسية لأبحاث TurboQuant، ندمج بين **الضغط الجذري للذاكرة اللحظية (KV Cache)** وبين متانة **الذاكرة الموجهة (Vector DB)** لإنتاج محرك قادر على تحمل تبديل السياق (Context Switching) بأعلى كفاءة.
 
 ---
 
@@ -63,10 +67,32 @@ pip install -e .
 **4. Download the Model:**
 Place your preferred `.gguf` model into the `models/` directory.
 
-**5. Ignite the Loop:**
+**5. Ignite the Loop (MVP Execution):**
+The project now supports full End-to-End Cognitive Loop execution via both a REST API and an Interactive CLI.
+
+**Option A: AlphaEdge CLI (Terminal Interface)**
+Run the AI directly via your terminal with zero-overhead:
 ```bash
-# Example execution (coming soon in src/)
-python src/core/engine.py
+# Interactive Mode
+python src/cli.py
+
+# Single-Shot Mode
+python src/cli.py "Write a secure python script that creates a local hash vault."
+```
+
+**Option B: AlphaEdge Local API (FastAPI)**
+Spin up the local backend to integrate extreme edge intelligence into your apps:
+```bash
+python api/main.py
+# Or via uvicorn directly:
+uvicorn api.main:app --reload
+```
+The API serves predictions via: `POST http://127.0.0.1:8000/api/v1/think`
+Send payload:
+```json
+{
+  "query": "How to optimize KV Cache on M-Series MacBooks?"
+}
 ```
 
 ---
