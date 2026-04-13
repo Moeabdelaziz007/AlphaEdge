@@ -26,7 +26,14 @@ dependencies = [
     "torch>=2.0.0",
     "transformers==4.51.3",
     "diffusers>=0.26.0",
-    "librosa>=0.10.0"
+    "librosa>=0.10.0",
+    "python-telegram-bot[job-queue]>=21.0",
+    "groq>=0.4.0",
+    "python-dotenv>=1.0.1",
+    "pytest>=8.0.0",
+    "google-generativeai>=0.4.0",
+    "requests>=2.31.0",
+    "aiohttp>=3.9.0"
 ]
 
 [project.optional-dependencies]

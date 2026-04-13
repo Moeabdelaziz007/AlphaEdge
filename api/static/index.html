@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AlphaEdge || Holographic Neural Link</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Telegram Mini App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <!-- The Three.js WebGL Canvas fills the entire viewport -->
+    <canvas id="hologram-canvas"></canvas>
+
+    <!-- Floating HUD Overlay -->
+    <div id="hud-layer">
+        <!-- State Label -->
+        <div id="state-label" class="hud-element">NEURAL LINK OFFLINE</div>
+
+        <!-- Result HUD Card (appears/disappears dynamically) -->
+        <div id="result-card" class="hud-card hidden">
+            <div class="card-header">SYNTHESIS OUTPUT</div>
+            <div id="result-content" class="card-body"></div>
+        </div>
+
+        <!-- Voice Waveform Indicator -->
+        <div id="voice-indicator" class="hud-element hidden">
+            <canvas id="waveform-canvas" width="300" height="60"></canvas>
+        </div>
+        
+        <!-- Skill Registry Live Feed -->
+        <div id="skill-feed" class="hud-element skill-hud hidden">
+            <span id="skill-label">FORGING: ...</span>
+        </div>
+    </div>
+
+    <!-- Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>

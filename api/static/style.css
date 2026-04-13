@@ -1,0 +1,128 @@
+:root {
+    --void-bg: #010101;
+    --neon-cyan: #00e5ff;
+    --neon-green: #00ff88;
+    --neon-blue: #2f5dff;
+    --neon-red: #ff3366;
+    --neon-gold: #ffd700;
+    --glass-bg: rgba(0, 20, 40, 0.65);
+    --glass-border: rgba(0,229,255,0.25);
+    --font-mono: 'Share Tech Mono', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--void-bg);
+    overflow: hidden;
+    font-family: var(--font-mono);
+    color: white;
+    cursor: crosshair;
+}
+
+#hologram-canvas {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 0;
+}
+
+/* ─── HUD Overlay ─── */
+#hud-layer {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    z-index: 10;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    padding-bottom: 5vh;
+}
+
+#state-label {
+    position: fixed;
+    bottom: 8%;
+    font-size: 1.8rem;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    text-shadow: 0 0 15px var(--neon-cyan), 0 0 30px rgba(0,229,255,0.3);
+    transition: all 0.4s ease;
+}
+
+/* ─── Result Card ─── */
+.hud-card {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(80vw, 700px);
+    max-height: 60vh;
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 4px;
+    padding: 2rem;
+    box-shadow: 0 0 40px rgba(0,229,255,0.15), inset 0 0 20px rgba(0,0,0,0.5);
+    overflow-y: auto;
+    pointer-events: auto;
+    animation: cardFadeIn 0.6s ease;
+}
+
+.card-header {
+    font-size: 0.9rem;
+    color: var(--neon-cyan);
+    letter-spacing: 4px;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--glass-border);
+    padding-bottom: 0.5rem;
+}
+
+.card-body {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: rgba(255,255,255,0.85);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* ─── Skill Building HUD ─── */
+.skill-hud {
+    position: fixed;
+    top: 10%;
+    right: 5%;
+    background: rgba(255,51,102,0.15);
+    border: 1px solid var(--neon-red);
+    padding: 0.8rem 1.5rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: var(--neon-red);
+    animation: glitchPulse 0.5s infinite;
+}
+
+/* ─── Voice Waveform ─── */
+#voice-indicator {
+    position: fixed;
+    bottom: 15%;
+}
+
+#waveform-canvas {
+    opacity: 0.7;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Animations */
+@keyframes cardFadeIn {
+    from { opacity: 0; transform: translate(-50%, -45%) scale(0.95); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes glitchPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; transform: translateX(2px); }
+}

@@ -22,3 +22,7 @@ class Generator:
             system_prompt=self.system_prompt, 
             temperature=0.7
         )
+
+    def hijack_prompt(self, new_prompt: str):
+        """Temporarily overwrite agent persona for Autonomous TDD Arena."""
+        self.system_prompt = new_prompt
