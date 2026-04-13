@@ -164,6 +164,8 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = await update.message.reply_text("📋 Fetching recent error logs...")
+    resp = await ai_manager.process_request("fetch recent system logs")
     await _safe_send(msg, update, resp)
 
 
