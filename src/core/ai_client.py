@@ -33,48 +33,45 @@ class AIClient:
         self.client = Groq(api_key=self.api_key)
         self.current_model_idx = 0
 
-    def chat_completion(self, messages: List[Dict[str, str]], **kwargs) -> Any:
+    def chat_completion(self, messages: List[Dict[str, str]], require_high_capability: bool = False, **kwargs) -> Any:
         """
         Executes a chat completion request with automatic model fallback.
         Accepts standard Groq kwargs (e.g., max_tokens, tools, response_format).
+        'require_high_capability' forces the use of only 70B+ models.
         """
-        original_model_idx = self.current_model_idx
         attempts = 0
-        max_attempts = len(self.GROQ_MODELS)
+        
+        # If high capability is required, we only use the first 2 models (70B+)
+        models_to_try = self.GROQ_MODELS[:2] if require_high_capability else self.GROQ_MODELS
+        max_attempts = len(models_to_try)
         
         while attempts < max_attempts:
-            model = self.GROQ_MODELS[self.current_model_idx]
+            # Use attempts index to rotate through models_to_try
+            model = models_to_try[attempts % len(models_to_try)]
             try:
-                # Force clean kwargs
                 active_kwargs = kwargs.copy()
                 active_kwargs["model"] = model
+                # Force zero-temperature for deterministic reliability
+                active_kwargs["temperature"] = active_kwargs.get("temperature", 0.0)
                 
                 response = self.client.chat.completions.create(
                     messages=messages,
                     **active_kwargs
                 )
                 
-                # If we succeeded with a fallback model, maybe log it.
-                if self.current_model_idx != original_model_idx:
-                    logger.info(f"Successfully recovered using fallback model: {model}")
-                
                 return response
 
             except RateLimitError as e:
                 logger.warning(f"Rate limit hit on {model}: {e}. Switching to next fallback.")
-                self.current_model_idx = (self.current_model_idx + 1) % len(self.GROQ_MODELS)
                 attempts += 1
             
             except APIError as e:
-                # Handle unexpected API failures (e.g. 503 Service Unavailable) by falling back too
                 logger.error(f"API Error on {model}: {e}. Attempting fallback.")
-                self.current_model_idx = (self.current_model_idx + 1) % len(self.GROQ_MODELS)
                 attempts += 1
                 
             except Exception as e:
-                # Other exceptions (like parsing or network complete breaks) bubble up
                 logger.error(f"Unexpected error in AIClient: {e}")
                 raise e
 
-        # If we exhausted all models
-        raise Exception("All Groq models exhausted or rate limited. Meta-Loop stalled.")
+        # Final failure
+        raise Exception(f"AI Capacity Exhausted: All relevant models {'(70B+)' if require_high_capability else ''} failed.")

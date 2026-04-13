@@ -91,8 +91,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("🧠 Generating Project Status Report...")
     try:
-        report = ai_manager.generate_daily_report()
-        await _safe_send(msg, update, report)
+        report = await ai_manager.generate_daily_report()
+        await update.message.reply_text(report)
     except Exception as e:
         await msg.edit_text(f"⚠️ Report Error: {e}")
 
@@ -138,7 +138,7 @@ async def handle_runskill(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     msg = await update.message.reply_text(f"⚙️ Running skill: {context.args[0]}...")
     # Wrap sync call via process_request
-    resp = ai_manager.process_request(f'execute the skill named "{context.args[0]}"')
+    resp = await ai_manager.process_request(f'execute the skill named "{context.args[0]}"')
     await _safe_send(msg, update, resp)
 
 
@@ -148,7 +148,7 @@ async def handle_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     query = " ".join(context.args)
     msg = await update.message.reply_text(f"🟩 Scanning Code Matrix for: {query}...")
-    resp = ai_manager.process_request(f'search my codebase for "{query}"')
+    resp = await ai_manager.process_request(f'search my codebase for "{query}"')
     await _safe_send(msg, update, resp)
 
 
@@ -158,13 +158,13 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     query = " ".join(context.args)
     msg = await update.message.reply_text(f"🌐 Searching Web for: {query}...")
-    resp = ai_manager.process_request(f'search the web for "{query}"')
+    resp = await ai_manager.process_request(f'search the web for "{query}"')
     await _safe_send(msg, update, resp)
 
 
 async def handle_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("📜 Reading memory logs...")
-    resp = ai_manager.process_request("read the chat logs")
+    resp = await ai_manager.process_request("read the chat logs")
     await _safe_send(msg, update, resp)
 
 
@@ -195,7 +195,7 @@ async def heartbeat_routine(context: ContextTypes.DEFAULT_TYPE):
         directive = f"HEARTBEAT BACKGROUND DIRECTIVE:\n\n{content}\n\nExecute the next logical phase autonomously."
         
         # We don't log this to chat history to avoid cluttering human chat logs
-        response = ai_manager.process_request(directive)
+        response = await ai_manager.process_request(directive, session_id="heartbeat")
         
         # Alert the user that the background agent did something
         await context.bot.send_message(
@@ -207,6 +207,30 @@ async def heartbeat_routine(context: ContextTypes.DEFAULT_TYPE):
         print(f"⚠️ Heartbeat Error: {e}")
 
 
+async def run_defi_challenger(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Background worker for the Income Generation Protocol.
+    Scans DeFi networks every 6 hours for logical vulnerabilities.
+    """
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not chat_id:
+        return
+        
+    try:
+        print("💸 Executing Income Generation Protocol (DeFi Challenger)...")
+        # Trigger the skill via the mental model (Brain)
+        response = await ai_manager.process_request("execute the skill named 'defi_auditor'", session_id="defi")
+        
+        # Proactively alert the user
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"💸 **Income Protocol Update**\n\n{response}",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        print(f"⚠️ DeFi Challenger Error: {e}")
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     msg = await update.message.reply_text("🧠 Routing through Meta-Loop...")
@@ -215,9 +239,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Log user query
         _log_chat("user", user_text)
         
-        response = ai_manager.process_request(user_text)
+        # Process via Brain
+        response = await ai_manager.process_request(user_text)
         
-        # Log AI response
         _log_chat("assistant", response)
         
         await _safe_send(msg, update, response)
@@ -242,11 +266,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         transcription = await _transcribe_audio(tmp_path)
 
         if transcription:
-            await msg.edit_text(f"🎙️ Heard: \"{transcription}\"\n\n🧠 Processing...")
-            _log_chat("user", f"[Voice] {transcription}")
-            
-            response = ai_manager.process_request(transcription)
-            
+            _log_chat("user", f"[VOICE] {transcription}")
+            response = await ai_manager.process_request(transcription)
             _log_chat("assistant", response)
             await _safe_send(msg, update, response)
         else:
@@ -280,7 +301,7 @@ async def auto_daily_report(context: ContextTypes.DEFAULT_TYPE):
     if not chat_id:
         return
     try:
-        report = ai_manager.generate_daily_report()
+        report = await ai_manager.generate_daily_report()
         safe_report = report.replace("```", "").replace("**", "")
         if len(safe_report) > 4000:
             for i in range(0, len(safe_report), 4000):
@@ -353,8 +374,12 @@ def run_manager_daemon():
         job_queue.run_daily(auto_daily_report, time=datetime.time(hour=9, minute=0))
         # Autonomously run the heartbeat routine every hour, starting 15 seconds after boot
         job_queue.run_repeating(heartbeat_routine, interval=3600, first=15)
+        # Income Generation Protocol: Run every 6 hours, starting 30 seconds after boot
+        job_queue.run_repeating(run_defi_challenger, interval=21600, first=30)
+        
         print("📊 Daily report scheduled for 09:00 AM.")
         print("🫀 Background Heartbeat (Cron) Loop Active.")
+        print("💸 DeFi Challenger (Income Protocol) Active (6h interval).")
     else:
         print("⚠️ JobQueue unavailable. Heartbeat disabled.")
 

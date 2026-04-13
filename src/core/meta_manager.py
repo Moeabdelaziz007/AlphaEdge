@@ -25,6 +25,7 @@ import urllib.parse
 import requests
 import re
 import google.generativeai as genai
+from src.core.saas_manager import SaaSManager, SaaSProject
 
 # Codebase Nervous System
 repo = RepoManager()
@@ -86,6 +87,7 @@ class MetaManager:
                 "6. Reliance on 3rd party -> Diversify tech reliance"
             )}
         ]
+        self.saas = SaaSManager(self)
 
     async def broadcast_state(self, state: str, data: dict = None):
         """Push real-time state updates to all connected WebSocket clients."""
@@ -383,6 +385,17 @@ class MetaManager:
             self.conversation.append({"role": "system", "content": f"CHAT LOGS:\n{sub_res}"})
             final_res = await self.reflect("Analyze these chat logs to solve my problem.")
             result = final_res.get("text", sub_res)
+        elif action == "build_saas":
+            # Direct handover to SaaS State Machine
+            project_name = decision.get("project_name", "MysteryProject")
+            description = decision.get("description", user_text)
+            price = decision.get("price", "$10/mo")
+            
+            project = self.saas.load_project(project_name)
+            project.config.update({"description": description, "price": price})
+            self.saas.save_project(project)
+            
+            result = await self.saas.advance_project(project_name)
         else:
             result = decision.get("text", "I have no response.")
 

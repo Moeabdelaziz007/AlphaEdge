@@ -1,0 +1,50 @@
+{
+    "name": "SpeechToPost_AI",
+    "state": "marketing",
+    "config": {
+        "description": "A powerful AI that converts voice notes into SEO-optimized blog posts using Go and Gin.",
+        "price": "$19/mo",
+        "language": "GOLANG",
+        "framework": "GIN"
+    },
+    "artifacts": {
+        "prd_path": "data/projects/speechtopost_ai_prd.md",
+        "linear_tickets": [
+            "TKT-001: Go/Gin Backend Scaffolding",
+            "TKT-002: Neon DB Schema Design",
+            "TKT-003: Gemini Audio Pipeline",
+            "TKT-004: Next.js Frontend v0",
+            "TKT-005: Stripe Checkout Flow"
+        ],
+        "db_connection": "VERIFIED_NEON_LINK",
+        "evolution_log": "Jules AI detected Gorm-related latency. Refactored to Raw SQL for hot paths. Security audit passed.",
+        "render_url": "https://speechtopost-ai.onrender.com"
+    },
+    "history": [
+        {
+            "from": "cognition",
+            "to": "infra",
+            "timestamp": "2026-04-13T04:38:00",
+            "report": "✅ P0 Complete. PRD generated in GO context."
+        },
+        {
+            "from": "infra",
+            "to": "development",
+            "timestamp": "2026-04-13T04:38:15",
+            "report": "✅ P1 Complete. Neon Database branched."
+        },
+        {
+            "from": "development",
+            "to": "refinement",
+            "timestamp": "2026-04-13T04:38:45",
+            "report": "🧬 P2 DNA Sequenced. Go code pushed to GitHub."
+        },
+        {
+            "from": "refinement",
+            "to": "marketing",
+            "timestamp": "2026-04-13T04:39:10",
+            "report": "🧬 Evolution Pulse: Performance bottlenecks fixed in Go/Gin."
+        }
+    ],
+    "updated_at": "2026-04-13T04:39:10"
+}

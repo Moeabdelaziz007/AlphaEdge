@@ -1,8 +1,10 @@
 import os
 import json
+import asyncio
 import requests
 from src.core.ai_client import AIClient
 from rich.console import Console
+from src.core.jules_bridge import JulesAIClient
 
 console = Console()
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -34,37 +36,20 @@ def invoke_gemini_deep_brain(query: str) -> str:
     except Exception as e:
         return f"[Gemini Error]: {e}"
 
-def trigger_jules_autonomous_agent(task_title: str, micro_tasks: str) -> str:
+async def trigger_jules_autonomous_agent(task_type: str, plan: str, context: str = "") -> str:
     """
     MCP Tool: The Singularity Gateway. 
-    Triggers Jules AI autonomously via its external webhook API to write the actual code and push PRs.
+    Triggers Jules AI via bridge to execute code and push PRs via MCPs.
     """
-    api_key = os.getenv("JULES_API_KEY")
-    url = os.getenv("JULES_WEBHOOK_URL")
+    jules = JulesAIClient()
+    repo = os.getenv("GITHUB_REPO", "Moeabdelaziz007/AlphaEdge")
     
-    if not api_key:
-        return "[Jules Trigger Blocked]: JULES_API_KEY not found."
+    result = await jules.dispatch_task(task_type, plan, context, repo=repo)
     
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "title": f"[Auto-Dispatched]: {task_title}",
-        "instructions": micro_tasks,
-        "context_sources": ["Render", "Neon", "Github PR"],
-        "trigger": "super_meta_loop"
-    }
-    
-    try:
-        # In a real environment, this actually pings the API.
-        # response = requests.post(url, json=payload, headers=headers, timeout=10)
-        # response.raise_for_status()
-        return f"🟢 [Jules AI Triggered Successfully]: Payload dispatched to API. Jules is now coding '{task_title}'."
-    except Exception as e:
-        # Graceful degraded fallback for testing without hitting live endpoint unnecessarily
-        return f"🟢 [Jules AI Simulated Trigger]: Jules API endpoint received '{task_title}'. (Exception caught: {e})"
+    if result.get("success"):
+        return f"🟢 [Jules AI Triggered]: {result.get('message')} (Task ID: {result.get('task_id')})"
+    else:
+        return f"⚠️ [Jules AI Failed]: {result.get('message')}"
 
 # Tool JSON schemas for Llama 3 Router
 tools = [
@@ -100,10 +85,11 @@ tools = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "task_title": { "type": "string", "description": "Short title of the PR" },
-                    "micro_tasks": { "type": "string", "description": "Highly precise Developer guidelines/prompts for Jules to execute." }
+                    "task_type": { "type": "string", "enum": ["ui", "database", "deployment", "tracking", "docs", "general"] },
+                    "plan": { "type": "string", "description": "Highly precise Developer guidelines/prompts for Jules to execute." },
+                    "context": { "type": "string", "description": "Optional extra context or error traces." }
                 },
-                "required": ["task_title", "micro_tasks"]
+                "required": ["task_type", "plan"]
             }
         }
     }
@@ -139,24 +125,35 @@ class AlphaManagerAI:
             "You have 3 primary weapons: \n"
             "1. Groq (Your immediate logic parser) \n"
             "2. Gemini API (Your Deep Brain for search) \n"
-            "3. Jules AI (Your Autonomous Coder via API webhook) \n"
-            "When the user asks for a complex feature: Call `invoke_gemini_deep_brain`. \n"
-            "Once you have the architecture ready: Call `trigger_jules_autonomous_agent` to fire the task payload. \n"
-            "You DO NOT write the heavy code yourself. You command Jules to do it. You act as the 10x Architect.\n\n"
-            "CRITICAL MANDATES:\n"
-            "1. You MUST ALWAYS speak and converse entirely in Arabic (العربية).\n"
-            "2. ANY reports you generate MUST be entirely in Arabic.\n"
-            "3. Keep in mind our Strategic Weaknesses & Mitigations:\n"
-            "   - Hardware dependency (Apple Metal) -> We will expand hardware support.\n"
-            "   - Cognitive switching complexity -> We aim to simplify the switching protocol.\n"
-            "   - Scalability limits -> We will invest in scalability research.\n"
-            "   - Privacy concerns -> We will implement strict privacy measures.\n"
-            "   - Lack of commercialization -> We will develop a strong commercial strategy.\n"
-            "   - Reliance on 3rd party tech -> We will diversify tech reliance.\n"
+            "3. Jules AI (Your Autonomous Coder via API webhook) \n\n"
+            "AGENTIC RULES:\n"
+            "1. You DO NOT write heavy code yourself. You command Jules to do it using `trigger_jules_autonomous_agent`.\n"
+            "2. NEVER print fake XML-style tags like `<function=...>` or `<tool=...>`. Use the PROVIDED tool-calling API.\n"
+            "3. If you 'lie' and say you triggered a tool without actually calling the system tool, you FAIL your objective.\n"
+            "4. RATIONALE-FIRST: Before calling a tool, you MUST explain your logic in Arabic starting with 'التفكير:'.\n"
+            "5. You MUST ALWAYS speak and converse entirely in Arabic (العربية).\n"
+            "6. ANY reports you generate MUST be entirely in Arabic.\n\n"
+            "Strategic Awareness:\n"
+            "- We have a Predictive Watcher daemon monitoring file changes and blast radius.\n"
+            "- We run locally on Apple Metal. Optimize for low memory overhead."
         )
-        self.chat_history = [{"role": "system", "content": self.system_prompt}]
-        
-    def _execute_tool(self, tool_call) -> str:
+        # Session Isolation: Store multiple histories
+        self.sessions = {}
+
+    def _get_history(self, session_id: str) -> list:
+        if session_id not in self.sessions:
+            self.sessions[session_id] = [{"role": "system", "content": self.system_prompt}]
+        return self.sessions[session_id]
+
+    def _prune_history(self, session_id: str, max_turns: int = 15):
+        history = self.sessions.get(session_id, [])
+        if len(history) > max_turns * 2:
+            # Keep system prompt + last N turns
+            system_msg = history[0]
+            last_msgs = history[-(max_turns * 2):]
+            self.sessions[session_id] = [system_msg] + last_msgs
+
+    async def _execute_tool(self, tool_call) -> str:
         name = tool_call.function.name
         args = json.loads(tool_call.function.arguments)
         
@@ -165,29 +162,55 @@ class AlphaManagerAI:
         elif name == "invoke_gemini_deep_brain":
             return invoke_gemini_deep_brain(args.get("query"))
         elif name == "trigger_jules_autonomous_agent":
-            return trigger_jules_autonomous_agent(args.get("task_title"), args.get("micro_tasks"))
+            # For Jules tasks, we always want high capability tracking
+            return await trigger_jules_autonomous_agent(args.get("task_type"), args.get("plan"), args.get("context", ""))
         return "Tool not found."
         
-    def process_request(self, user_text: str, use_tools=True) -> str:
+    async def process_request(self, user_text: str, session_id: str = "human", use_tools=True) -> str:
+        history = self._get_history(session_id)
+        history.append({"role": "user", "content": user_text})
+        
+        # High capability for automated sessions to prevent hallucinations
+        require_high = session_id in ["heartbeat", "defi", "system"]
+        
         try:
-            self.chat_history.append({"role": "user", "content": user_text})
-            
             kwargs = {
-                "messages": self.chat_history,
-                "max_tokens": 2048
+                "messages": history,
+                "max_tokens": 2048,
+                "require_high_capability": require_high
             }
             if use_tools:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = "auto"
 
-            response = self.ai_client.chat_completion(**kwargs)
-            response_message = response.choices[0].message
+            attempts = 0
+            max_sentinel_retries = 2
             
+            while attempts <= max_sentinel_retries:
+                response = self.ai_client.chat_completion(**kwargs)
+                response_message = response.choices[0].message
+                content = response_message.content or ""
+                
+                # Hallucination Sentinel: If it "speaks" code/results without calling tools
+                has_fake_results = ("```" in content or "Result:" in content or "الناتج:" in content)
+                if not response_message.tool_calls and has_fake_results and require_high:
+                    console.print(f"[yellow]⚠️ Sentinel Trip in {session_id} (Attempt {attempts+1}). AI hallucinated results.[/yellow]")
+                    history.append({"role": "assistant", "content": content})
+                    history.append({
+                        "role": "user", 
+                        "content": "CRITICAL ERROR: You printed a code result or block but did NOT call any tools. You are a reasoning engine, not an executor. You MUST use trigger_jules_autonomous_agent or other tools to actually run code. DO NOT invent outputs."
+                    })
+                    attempts += 1
+                    continue
+                
+                # Successfully didn't hallucinate or used tools
+                break
+
             if response_message.tool_calls:
-                self.chat_history.append(response_message)
+                history.append(response_message)
                 for tool_call in response_message.tool_calls:
-                    tool_result = self._execute_tool(tool_call)
-                    self.chat_history.append({
+                    tool_result = await self._execute_tool(tool_call)
+                    history.append({
                         "tool_call_id": tool_call.id,
                         "role": "tool",
                         "name": tool_call.function.name,
@@ -195,20 +218,23 @@ class AlphaManagerAI:
                     })
                 
                 final_response = self.ai_client.chat_completion(
-                    messages=self.chat_history,
-                    max_tokens=2048
+                    messages=history,
+                    max_tokens=2048,
+                    require_high_capability=require_high
                 )
                 output = final_response.choices[0].message.content
             else:
-                output = response_message.content
+                output = response_message.content or "No response from AI."
                 
-            self.chat_history.append({"role": "assistant", "content": output})
+            history.append({"role": "assistant", "content": output})
+            self._prune_history(session_id)
             return str(output)
             
         except Exception as e:
             return f"❌ AI Engine Error: {e}"
+
             
-    def generate_daily_report(self) -> str:
+    async def generate_daily_report(self) -> str:
         try:
             with open(os.path.join(project_root, 'README.md'), 'r') as f:
                 readme_content = f.read()[:2000]
@@ -224,4 +250,5 @@ class AlphaManagerAI:
             "2. [رؤى وأفكار من Gemini] - Strategic direction based on limits & repos.\n"
             "3. [المهام المجدولة لـ Jules] - What Jules should do next."
         )
-        return self.process_request(prompt, use_tools=True)
+        return await self.process_request(prompt, session_id="system", use_tools=True)
+

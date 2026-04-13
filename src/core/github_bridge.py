@@ -219,10 +219,22 @@ class RepoManager:
         return "\n".join([f"  #{pr['number']} {pr['title']}" for pr in prs[:10]])
 
     def list_remote_commits(self, count: int = 5) -> str:
-        result = self._github_get("commits", {"per_page": count})
-        if not result["ok"]:
-            return f"Commit error: {result['error']}"
         return "\n".join([f"  {c['sha'][:7]} - {c['commit']['message'].split(chr(10))[0][:80]}" for c in result["data"]])
+
+    def merge_pr(self, pr_number: int) -> dict:
+        """Merges a Pull Request via GitHub REST API (Squash Merge)."""
+        try:
+            resp = requests.put(
+                f"{self.api_base}/pulls/{pr_number}/merge",
+                headers=self.headers,
+                json={"merge_method": "squash", "commit_title": f"Auto-Merge PR #{pr_number}"},
+                timeout=15
+            )
+            if resp.status_code == 200:
+                return {"ok": True, "message": f"Successfully merged PR #{pr_number}"}
+            return {"ok": False, "error": f"Merge Error {resp.status_code}: {resp.json().get('message', resp.text)}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     # ═══════════════════════════════════════
     #  CODEBASE CONTEXT FOR JULES AI
