@@ -257,7 +257,8 @@ class AlphaManagerAI:
                     require_high_capability=require_high
                 )
                 output = final_response.choices[0].message.content
-            output = response_message.content or "No response from AI."
+            else:
+                output = response_message.content or "No response from AI."
                 
             history.append({"role": "assistant", "content": output})
             # Trigger autonomous reflection
@@ -287,4 +288,3 @@ class AlphaManagerAI:
             "3. [المهام المجدولة لـ Jules] - What Jules should do next."
         )
         return await self.process_request(prompt, session_id="system", use_tools=True)
-

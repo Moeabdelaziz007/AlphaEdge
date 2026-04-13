@@ -219,7 +219,12 @@ class RepoManager:
         return "\n".join([f"  #{pr['number']} {pr['title']}" for pr in prs[:10]])
 
     def list_remote_commits(self, count: int = 5) -> str:
-        return "\n".join([f"  {c['sha'][:7]} - {c['commit']['message'].split(chr(10))[0][:80]}" for c in result["data"]])
+        result = self._github_get("commits", {"per_page": count})
+        if not result["ok"]:
+            return f"Commit error: {result['error']}"
+        return "\n".join(
+            [f"  {c['sha'][:7]} - {c['commit']['message'].split(chr(10))[0][:80]}" for c in result["data"]]
+        )
 
     def merge_pr(self, pr_number: int) -> dict:
         """Merges a Pull Request via GitHub REST API (Squash Merge)."""
@@ -235,6 +240,21 @@ class RepoManager:
             return {"ok": False, "error": f"Merge Error {resp.status_code}: {resp.json().get('message', resp.text)}"}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    def review_and_merge_pr(self, pr_number: int, approved: bool = False) -> dict:
+        """
+        Enforces a human-review gate before merge so autonomous tasks
+        can be inspected by a manager before code lands on main.
+        """
+        if not approved:
+            return {
+                "ok": False,
+                "error": (
+                    f"PR #{pr_number} requires explicit manager approval before merge. "
+                    "Review in GitHub, then call with approved=True."
+                ),
+            }
+        return self.merge_pr(pr_number)
 
     # ═══════════════════════════════════════
     #  CODEBASE CONTEXT FOR JULES AI

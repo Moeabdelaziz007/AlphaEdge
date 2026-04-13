@@ -31,7 +31,6 @@ from src.core.saas_manager import SaaSManager, SaaSProject
 repo = RepoManager()
 
 # Initialize AI Engines
-ai_client = AIClient()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
 gemini_model = genai.GenerativeModel('gemini-1.5-flash')
 
@@ -51,6 +50,7 @@ class MetaManager:
     def __init__(self):
         self.state = "idle"
         self.ws_broadcast = None
+        self.ai_client = AIClient()
         self.conversation = [
             {"role": "system", "content": (
                 "You are AlphaEdge's Meta-Manager, an autonomous 10x architect. "
@@ -88,6 +88,7 @@ class MetaManager:
             )}
         ]
         self.saas = SaaSManager(self)
+        self.gemini_model = gemini_model
 
     async def broadcast_state(self, state: str, data: dict = None):
         """Push real-time state updates to all connected WebSocket clients."""
@@ -111,7 +112,7 @@ class MetaManager:
         })
 
         try:
-            response = ai_client.chat_completion(
+            response = self.ai_client.chat_completion(
                 messages=self.conversation,
                 max_tokens=2048,
                 response_format={"type": "json_object"}
@@ -258,11 +259,17 @@ class MetaManager:
             repo_status = repo.get_git_status()
             prs = repo.list_open_prs()
             
+            review_note = (
+                "### Merge Gate:\n"
+                "🔍 Manager review is REQUIRED before merge. "
+                "Use RepoManager.review_and_merge_pr(pr_number, approved=True) only after human approval.\n\n"
+            )
             return (
                 f"🟢 Jules Task '{task_type}' finished with status: [{final_status}]\n\n"
                 f"### Output Logs:\n{status_data.get('message', 'No details.')}\n\n"
                 f"### Auto-Verification (Git):\n{repo_status}\n\n"
-                f"### Open PRs:\n{prs}"
+                f"### Open PRs:\n{prs}\n\n"
+                f"{review_note}"
             )
         else:
             msg = result.get("message", "Unknown error")
