@@ -1,0 +1,28 @@
+{
+    "name": "TestSummarizer",
+    "state": "cognition",
+    "config": {
+        "description": "A tool that summarizes long videos for marketers.",
+        "price": "$15/mo",
+        "product_type": "dashboard"
+    },
+    "artifacts": {
+        "prd_path": null,
+        "linear_tickets": [],
+        "db_connection": null,
+        "render_url": null,
+        "stripe_status": "pending",
+        "repo_branch": null,
+        "template_type": "dashboard",
+        "scaffold_dir": null,
+        "ci_cd_pipeline": null,
+        "smoke_tests": [],
+        "deploy_status": "pending",
+        "rollback_status": "not_required",
+        "last_deploy_health_report": null
+    },
+    "history": [],
+    "last_error": "'MetaManager' object has no attribute 'gemini_model'",
+    "retry_count": 1,
+    "updated_at": "2026-04-13T07:35:25.972214"
+}

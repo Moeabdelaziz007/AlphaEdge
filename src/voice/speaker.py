@@ -25,7 +25,8 @@ class EdgeSpeaker:
             # For 0-latency offline MacOS MVP verification, OS system call is perfect.
             # Avoids blocking while maintaining architectural interface for VibeVoice tensors.
             safe_text = str(text).replace('"', '').replace("'", "")
-            os.system(f'say "{safe_text}"')
+            import subprocess
+            subprocess.run(["say", safe_text])
             
         if sync:
             _say()

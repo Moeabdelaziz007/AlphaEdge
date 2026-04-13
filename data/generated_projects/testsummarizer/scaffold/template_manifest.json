@@ -1,0 +1,14 @@
+{
+  "project": "TestSummarizer",
+  "product_type": "dashboard",
+  "template": {
+    "name": "dashboard_foundation",
+    "description": "B2B dashboard SaaS with web frontend and analytics.",
+    "features": [
+      "admin_panel",
+      "analytics",
+      "multi_tenant_views"
+    ]
+  },
+  "generated_at": "2026-04-13T07:35:25.970316"
+}
