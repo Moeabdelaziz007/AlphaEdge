@@ -13,7 +13,7 @@ import traceback
 import time
 from typing import Optional
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env'))
@@ -22,11 +22,10 @@ from src.core.ai_client import AIClient
 from src.skills import list_skills, load_skill, SKILLS_DIR
 from src.core.jules_bridge import JulesAIClient
 from src.core.github_bridge import RepoManager
-import urllib.parse
 import requests
 import re
 import google.generativeai as genai
-from src.core.saas_manager import SaaSManager, SaaSProject
+from src.core.saas_manager import SaaSManager
 from src.core.telemetry import TelemetryLogger
 
 # Codebase Nervous System
@@ -74,7 +73,9 @@ class MetaManager:
                 "- Read the Telegram chat history to analyze past conversations, errors, and debug.\n"
                 "7. {\"action\": \"update_memory\", \"new_content\": \"...\"} "
                 "- Rewrite the heartbeat.md file to mark tasks as completed or add new findings.\n"
-                "8. {\"action\": \"speak\", \"text\": \"...\"} - For conversational responses.\n\n"
+                "8. {\"action\": \"build_saas\", \"project_name\": \"...\", \"description\": \"...\", \"price\": \"...\"} "
+                "- To trigger an automated Micro-SaaS creation/deployment cycle from zero to live edge infrastructure.\n"
+                "9. {\"action\": \"speak\", \"text\": \"...\"} - For conversational responses.\n\n"
                 "CRITICAL INSTRUCTIONS (ANTI-GRAVITY PROTOCOL):\n"
                 "1. You are not a chatbot. You are AlphaEdge, a persistent, state-aware Senior Software Engineer and 10x Architect.\n"
                 "2. You possess Agentic Permanence. Read your memory, observe the codebase, and act deliberately.\n"
@@ -239,7 +240,7 @@ class MetaManager:
                 if result.returncode == 0:
                     return {"success": True, "output": result.stdout}
                 return {"success": False, "error": result.stderr[:500]}
-            except Exception as e:
+            except Exception:
                 # Docker failed, fall through to subprocess
                 pass
 
@@ -423,11 +424,11 @@ class MetaManager:
             # return last 20 entries
             recent = lines[-20:]
             history = []
-            for l in recent:
+            for line in recent:
                 try:
-                    data = json.loads(l)
+                    data = json.loads(line)
                     history.append(f"[{data.get('timestamp')[:19]}] {data.get('role').upper()}: {data.get('content')[:200]}")
-                except:
+                except Exception:
                     pass
             return "📜 Recent Chat Logs:\n" + "\n".join(history)
         except Exception as e:

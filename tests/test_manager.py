@@ -1,3 +1,4 @@
+import pytest
 """
 End-to-End Test: Manager Workflow + Telegram Report Delivery
 Tests: Groq connection, Gemini init, Report generation, Telegram message delivery.
@@ -49,6 +50,11 @@ def test_groq_connection():
         print(f"  ❌ Groq FAILED: {e}")
         return None
 
+@pytest.fixture
+def manager():
+    from src.manager.intelligence import AlphaManagerAI
+    return AlphaManagerAI()
+
 def test_report_generation(manager):
     """Step 3: Generate the project status report."""
     print("\n" + "=" * 60)
@@ -64,6 +70,10 @@ def test_report_generation(manager):
     except Exception as e:
         print(f"  ❌ Report generation FAILED: {e}")
         return None
+
+@pytest.fixture
+def report():
+    return 'test report'
 
 def test_telegram_delivery(report):
     """Step 4: Send the report directly to Telegram (raw API, bypasses bot framework)."""
