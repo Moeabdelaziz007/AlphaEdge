@@ -11,6 +11,13 @@ from src.core.pipeline import CognitivePipeline
 
 console = Console()
 
+def _initialize_pipeline():
+    try:
+        return CognitivePipeline()
+    except Exception as e:
+        console.print(f"[bold red]System Offline:[/bold red] {e}\n[dim]Run 'python scripts/setup_models.py' if models are missing.[/dim]")
+        sys.exit(1)
+
 def main():
     parser = argparse.ArgumentParser(description="AlphaEdge Cognitive CLI")
     parser.add_argument("query", type=str, nargs="?", help="The problem you want the Cognitive Loop to solve.")
@@ -24,11 +31,7 @@ def main():
         speaker = EdgeSpeaker()
         
         console.print(Panel("[bold red]🎙️ LIVE VibeVoice MODE ACTIVE[/bold red]\nSpeak to the system naturally. Press Ctrl+C to stop.", border_style="red"))
-        try:
-            pipeline = CognitivePipeline()
-        except Exception as e:
-            console.print(f"[bold red]Offline:[/bold red] {e}\n[dim]Run 'python scripts/setup_models.py' if models are missing.[/dim]")
-            return
+        pipeline = _initialize_pipeline()
             
         while True:
             try:
@@ -52,11 +55,7 @@ def main():
     elif not args.query:
         # Interactive mode
         console.print(Panel("[bold cyan]🔹 alphaEdge Cognitive CLI[/bold cyan]\nType 'exit' to quit. (Zero-Latency Edge AI)", border_style="cyan"))
-        try:
-            pipeline = CognitivePipeline()
-        except Exception as e:
-            console.print(f"[bold red]System Offline:[/bold red] {e}\n[dim]Run 'python scripts/setup_models.py' if models are missing.[/dim]")
-            return
+        pipeline = _initialize_pipeline()
             
         while True:
             try:
@@ -74,12 +73,9 @@ def main():
                 console.print(f"[bold red]\nLoop Error:[/bold red] {e}")
     else:
         # Single shot
-        try:
-            pipeline = CognitivePipeline()
-            state = pipeline.run(args.query)
-            console.print(Panel(state.synthesized_result, border_style="green", title="AlphaEdge Synthesis"))
-        except Exception as e:
-            console.print(f"[bold red]Error:[/bold red] {e}\n[dim]Run 'python scripts/setup_models.py' if models are missing.[/dim]")
+        pipeline = _initialize_pipeline()
+        state = pipeline.run(args.query)
+        console.print(Panel(state.synthesized_result, border_style="green", title="AlphaEdge Synthesis"))
 
 if __name__ == "__main__":
     main()
