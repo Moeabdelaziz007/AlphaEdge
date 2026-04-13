@@ -128,8 +128,10 @@ class MemoryLayer:
         if not self.vec_enabled:
             # Fallback to standard SQL text matching
             keywords = query.split()
-            sql_query = "SELECT content FROM documents WHERE " + " OR ".join(["content LIKE ?"] * len(keywords)) + f" LIMIT {top_k}"
+            where_clause = " OR ".join(["content LIKE ?"] * len(keywords))
+            sql_query = "SELECT content FROM documents WHERE " + where_clause + " LIMIT ?"  # nosec
             search_params = [f"%{k}%" for k in keywords]
+            search_params.append(top_k)
             results = cursor.execute(sql_query, search_params).fetchall()
             return [row[0] for row in results]
             
