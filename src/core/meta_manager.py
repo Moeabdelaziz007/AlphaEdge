@@ -51,6 +51,7 @@ class MetaManager:
     def __init__(self):
         self.state = "idle"
         self.ws_broadcast = None
+        self.pattern_axioms = []
         self.conversation = [
             {"role": "system", "content": (
                 "You are AlphaEdge's Meta-Manager, an autonomous 10x architect. "
@@ -88,6 +89,106 @@ class MetaManager:
             )}
         ]
         self.saas = SaaSManager(self)
+
+    def _score_axiom_candidate(self, axiom, query_tokens: set) -> dict:
+        """Normalize and score a candidate axiom using confidence + lexical overlap."""
+        if isinstance(axiom, dict):
+            text = str(axiom.get("text") or axiom.get("content") or "").strip()
+            base_conf = float(axiom.get("confidence", 0.5) or 0.5)
+        else:
+            text = str(axiom).strip()
+            base_conf = 0.5
+
+        if not text:
+            return {}
+
+        text_tokens = {t for t in re.findall(r"\w+", text.lower()) if len(t) > 2}
+        overlap = len(query_tokens & text_tokens)
+        overlap_ratio = overlap / max(1, len(query_tokens))
+        final_conf = min(0.99, max(0.0, (0.7 * base_conf) + (0.3 * overlap_ratio)))
+        return {
+            "text": text,
+            "confidence": final_conf,
+        }
+
+    def _smart_truncate_text(self, text: str, max_chars: int = 1800) -> str:
+        """
+        Truncate at a sentence/newline boundary when possible to preserve meaning.
+        """
+        if len(text) <= max_chars:
+            return text
+
+        window = text[:max_chars]
+        boundary = max(window.rfind("\n"), window.rfind(". "), window.rfind("؛"), window.rfind("،"))
+        if boundary < int(max_chars * 0.6):
+            boundary = max_chars
+        return window[:boundary].rstrip() + "\n...[truncated]"
+
+    def _retrieve_relevant_axioms(self, task_type: str, plan: str, context: str) -> list:
+        """
+        Retrieve relevant axioms from pattern_axioms:
+        - Vector search if an attached index/search interface exists.
+        - Otherwise fallback to lexical matching.
+        Returns top 3-7 highest-confidence axioms.
+        """
+        if not self.pattern_axioms:
+            return []
+
+        query = f"{task_type} {plan} {context}".strip()
+        query_tokens = {t for t in re.findall(r"\w+", query.lower()) if len(t) > 2}
+        scored = []
+
+        # Vector/search interface mode
+        if hasattr(self.pattern_axioms, "search"):
+            try:
+                candidates = self.pattern_axioms.search(query, top_k=12)
+                for candidate in candidates or []:
+                    normalized = self._score_axiom_candidate(candidate, query_tokens)
+                    if normalized:
+                        scored.append(normalized)
+            except Exception:
+                pass
+        elif hasattr(self.pattern_axioms, "search_memory"):
+            try:
+                candidates = self.pattern_axioms.search_memory(query, top_k=12)
+                for candidate in candidates or []:
+                    normalized = self._score_axiom_candidate(candidate, query_tokens)
+                    if normalized:
+                        scored.append(normalized)
+            except Exception:
+                pass
+        else:
+            # Textual fallback for iterable axioms
+            try:
+                for candidate in self.pattern_axioms:
+                    normalized = self._score_axiom_candidate(candidate, query_tokens)
+                    if normalized:
+                        scored.append(normalized)
+            except TypeError:
+                return []
+
+        if not scored:
+            return []
+
+        # Deduplicate by text while keeping highest confidence.
+        best_by_text = {}
+        for item in scored:
+            prev = best_by_text.get(item["text"])
+            if prev is None or item["confidence"] > prev["confidence"]:
+                best_by_text[item["text"]] = item
+
+        ranked = sorted(best_by_text.values(), key=lambda x: x["confidence"], reverse=True)
+
+        # Keep between 3 and 7 when possible, prioritizing confidence.
+        min_count, max_count = 3, 7
+        if len(ranked) <= min_count:
+            return ranked
+
+        cutoff = max(0.45, ranked[min(max_count, len(ranked)) - 1]["confidence"])
+        selected = [a for a in ranked if a["confidence"] >= cutoff][:max_count]
+        if len(selected) < min_count:
+            selected = ranked[:min(max_count, len(ranked))]
+        return selected
 
     async def broadcast_state(self, state: str, data: dict = None):
         """Push real-time state updates to all connected WebSocket clients."""
@@ -243,6 +344,18 @@ class MetaManager:
         await self.broadcast_state("code_matrix", {"label": "Indexing relevant files for Jules..."})
         code_context = repo.get_relevant_context(plan[:200])
         enriched_context = f"{context}\n\n### LIVE CODEBASE CONTEXT:\n{code_context}"
+
+        # SYSTEM INTUITION INJECTION: add high-confidence axioms before enriched_context.
+        axioms = self._retrieve_relevant_axioms(task_type, plan, context)
+        if axioms:
+            axiom_lines = []
+            for i, ax in enumerate(axioms, 1):
+                axiom_lines.append(
+                    f"{i}. MUST follow this axiom (confidence {ax['confidence']:.2f}): {ax['text']}"
+                )
+            intuition_block = "[SYSTEM INTUITION]\n" + "\n".join(axiom_lines)
+            combined_context = f"{intuition_block}\n\n{enriched_context}"
+            enriched_context = self._smart_truncate_text(combined_context, max_chars=4200)
 
         result = await jules.dispatch_task(task_type, plan, enriched_context)
 
