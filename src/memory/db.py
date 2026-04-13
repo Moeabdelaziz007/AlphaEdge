@@ -24,23 +24,8 @@ class MemoryLayer:
             print("⚠️ macOS SIP/PYENV Vector Block Detected: sqlite3 lacks 'enable_load_extension'.")
             print("⚠️ Running MemoryLayer in Degraded SQL Mode (No Vector Search).")
             self.vec_enabled = False
-        
-        self.db.execute('''
-            CREATE TABLE IF NOT EXISTS documents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                content TEXT
-            )
-        ''')
-        
-        # nomic-embed-text-v1.5 outputs exactly 768 dimensions
-        if self.vec_enabled:
-            self.db.execute('''
-                CREATE VIRTUAL TABLE IF NOT EXISTS vec_documents USING vec0(
-                    id INTEGER PRIMARY KEY,
-                    embedding float[768]
-                )
-            ''')
-        self.db.commit()
+
+        self.initialize_schema()
         
         if not os.path.exists(embed_model_path):
             raise FileNotFoundError(f"Embedding Model not found at {embed_model_path}. Run scripts/setup_models.py.")
@@ -52,6 +37,70 @@ class MemoryLayer:
             n_gpu_layers=-1, 
             verbose=False
         )
+
+    def initialize_schema(self):
+        """Initialize all persistent tables and indexes used by memory and telemetry layers."""
+        self.db.execute('''
+            CREATE TABLE IF NOT EXISTS documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT
+            )
+        ''')
+
+        self.db.execute('''
+            CREATE TABLE IF NOT EXISTS reflection_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                reflection TEXT NOT NULL,
+                score REAL NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        self.db.execute('''
+            CREATE TABLE IF NOT EXISTS system_telemetry (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                agent_name TEXT NOT NULL,
+                tokens_used INTEGER,
+                execution_time_ms INTEGER,
+                success_bool INTEGER NOT NULL,
+                ram_spike REAL,
+                task_type TEXT,
+                error_class TEXT
+            )
+        ''')
+
+        self.db.execute('''
+            CREATE TABLE IF NOT EXISTS pattern_axioms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                axiom_text TEXT NOT NULL,
+                scope TEXT,
+                confidence REAL
+            )
+        ''')
+
+        # nomic-embed-text-v1.5 outputs exactly 768 dimensions
+        if self.vec_enabled:
+            self.db.execute('''
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_documents USING vec0(
+                    id INTEGER PRIMARY KEY,
+                    embedding float[768]
+                )
+            ''')
+            self.db.execute('''
+                CREATE VIRTUAL TABLE IF NOT EXISTS vec_pattern_axioms USING vec0(
+                    id INTEGER PRIMARY KEY,
+                    embedding float[768]
+                )
+            ''')
+
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_logs_timestamp ON reflection_logs(timestamp DESC)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_system_telemetry_timestamp ON system_telemetry(timestamp DESC)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_system_telemetry_agent_name ON system_telemetry(agent_name)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS idx_system_telemetry_task_type ON system_telemetry(task_type)")
+        self.db.commit()
 
     def _serialize_f32(self, vector: List[float]) -> bytes:
         """Serializes Python floats into C-level contiguous 4-byte values for sqlite-vec."""
