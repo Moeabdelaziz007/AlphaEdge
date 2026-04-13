@@ -10,6 +10,7 @@ import asyncio
 import subprocess
 import shutil
 import traceback
+import time
 from typing import Optional
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -26,6 +27,7 @@ import requests
 import re
 import google.generativeai as genai
 from src.core.saas_manager import SaaSManager, SaaSProject
+from src.core.telemetry import TelemetryLogger
 
 # Codebase Nervous System
 repo = RepoManager()
@@ -51,6 +53,8 @@ class MetaManager:
     def __init__(self):
         self.state = "idle"
         self.ws_broadcast = None
+        self.system_telemetry: list[dict] = []
+        self.telemetry = TelemetryLogger(self.system_telemetry)
         self.conversation = [
             {"role": "system", "content": (
                 "You are AlphaEdge's Meta-Manager, an autonomous 10x architect. "
@@ -89,6 +93,26 @@ class MetaManager:
         ]
         self.saas = SaaSManager(self)
 
+    @staticmethod
+    def _extract_tokens_used(response) -> Optional[int]:
+        """Best-effort extraction of token usage across providers."""
+        if response is None:
+            return None
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            return (
+                getattr(usage, "total_tokens", None)
+                or getattr(usage, "total_token_count", None)
+                or getattr(usage, "prompt_tokens", 0) + getattr(usage, "completion_tokens", 0)
+            )
+        usage_meta = getattr(response, "usage_metadata", None)
+        if usage_meta is not None:
+            return (
+                getattr(usage_meta, "total_token_count", None)
+                or getattr(usage_meta, "prompt_token_count", 0) + getattr(usage_meta, "candidates_token_count", 0)
+            )
+        return None
+
     async def broadcast_state(self, state: str, data: dict = None):
         """Push real-time state updates to all connected WebSocket clients."""
         self.state = state
@@ -101,6 +125,11 @@ class MetaManager:
     # ─── Phase 1: Reflect (Groq Intent Parser) ───
     async def reflect(self, user_text: str) -> dict:
         await self.broadcast_state("reflecting", {"label": "Groq Parsing Intent..."})
+        started = time.perf_counter()
+        ram_before = self.telemetry.current_rss()
+        success = False
+        tokens_used = None
+        error = None
 
         available = list_skills()
         skill_context = f"Available skills: {available}" if available else "No skills learned yet."
@@ -116,45 +145,79 @@ class MetaManager:
                 max_tokens=2048,
                 response_format={"type": "json_object"}
             )
+            tokens_used = self._extract_tokens_used(response)
             raw = response.choices[0].message.content
             self.conversation.append({"role": "assistant", "content": raw})
+            success = True
             return json.loads(raw)
         except Exception as e:
+            error = str(e)
             return {"action": "speak", "text": f"Reflection error: {e}"}
+        finally:
+            self.telemetry.log_action(
+                action="reflect",
+                agent="groq",
+                success=success,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                ram_before=ram_before,
+                ram_after=self.telemetry.current_rss(),
+                tokens_used=tokens_used,
+                error=error,
+            )
 
     # ─── Phase 2: Skill-Maker (Gemini Deep Brain + Docker Sandbox) ───
     async def build_skill(self, skill_name: str, description: str, python_code: str) -> str:
         await self.broadcast_state("skill_building", {"label": f"Forging Skill: {skill_name}"})
+        started = time.perf_counter()
+        ram_before = self.telemetry.current_rss()
+        success = False
+        tokens_used = None
+        error = None
 
-        skill_path = os.path.join(SKILLS_DIR, f"{skill_name}.py")
-
-        # Enrich the code with Gemini
         try:
-            gemini_prompt = (
-                f"Review and improve this Python skill script. "
-                f"It must have a `run()` function that returns a string result. "
-                f"Fix any bugs. Output ONLY the improved Python code, no markdown.\n\n"
-                f"Description: {description}\n\nCode:\n{python_code}"
+            skill_path = os.path.join(SKILLS_DIR, f"{skill_name}.py")
+
+            # Enrich the code with Gemini
+            try:
+                gemini_prompt = (
+                    f"Review and improve this Python skill script. "
+                    f"It must have a `run()` function that returns a string result. "
+                    f"Fix any bugs. Output ONLY the improved Python code, no markdown.\n\n"
+                    f"Description: {description}\n\nCode:\n{python_code}"
+                )
+                gemini_response = gemini_model.generate_content(gemini_prompt)
+                tokens_used = self._extract_tokens_used(gemini_response)
+                improved_code = gemini_response.text.replace("```python", "").replace("```", "").strip()
+            except Exception:
+                improved_code = python_code
+
+            # Write the skill file
+            with open(skill_path, 'w') as f:
+                f.write(improved_code)
+
+            # Test in Docker Sandbox (preferred) or subprocess fallback
+            await self.broadcast_state("skill_building", {"label": f"Sandbox Testing: {skill_name}"})
+            test_result = await self._sandbox_test(skill_path, skill_name)
+
+            if not test_result["success"]:
+                if os.path.exists(skill_path):
+                    os.remove(skill_path)
+                error = test_result["error"]
+                return f"❌ Skill '{skill_name}' failed: {test_result['error']}"
+
+            success = True
+            return f"✅ Skill '{skill_name}' forged and registered! Output: {test_result['output'][:300]}"
+        finally:
+            self.telemetry.log_action(
+                action="build_skill",
+                agent="gemini",
+                success=success,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                ram_before=ram_before,
+                ram_after=self.telemetry.current_rss(),
+                tokens_used=tokens_used,
+                error=error,
             )
-            gemini_response = gemini_model.generate_content(gemini_prompt)
-            improved_code = gemini_response.text.replace("```python", "").replace("```", "").strip()
-        except Exception:
-            improved_code = python_code
-
-        # Write the skill file
-        with open(skill_path, 'w') as f:
-            f.write(improved_code)
-
-        # Test in Docker Sandbox (preferred) or subprocess fallback
-        await self.broadcast_state("skill_building", {"label": f"Sandbox Testing: {skill_name}"})
-        test_result = await self._sandbox_test(skill_path, skill_name)
-
-        if not test_result["success"]:
-            if os.path.exists(skill_path):
-                os.remove(skill_path)
-            return f"❌ Skill '{skill_name}' failed: {test_result['error']}"
-
-        return f"✅ Skill '{skill_name}' forged and registered! Output: {test_result['output'][:300]}"
 
     async def _sandbox_test(self, skill_path: str, skill_name: str) -> dict:
         """Tests a skill in Docker (if available) or subprocess fallback."""
@@ -197,14 +260,30 @@ class MetaManager:
     # ─── Phase 3: Execute Existing Skill ───
     async def execute_skill(self, skill_name: str) -> str:
         await self.broadcast_state("executing", {"label": f"Running: {skill_name}"})
+        started = time.perf_counter()
+        ram_before = self.telemetry.current_rss()
+        success = False
+        error = None
         try:
             module = load_skill(skill_name)
             if module is None:
                 return f"Skill '{skill_name}' not found."
             result = module.run()
+            success = True
             return str(result)
         except Exception:
-            return f"Skill execution error: {traceback.format_exc()}"
+            error = traceback.format_exc()
+            return f"Skill execution error: {error}"
+        finally:
+            self.telemetry.log_action(
+                action="execute_skill",
+                agent="meta_manager",
+                success=success,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                ram_before=ram_before,
+                ram_after=self.telemetry.current_rss(),
+                error=error,
+            )
 
     # ─── Phase 3.5: Update Memory (The Heartbeat Modification) ───
     async def update_memory(self, new_content: str) -> str:
@@ -238,46 +317,70 @@ class MetaManager:
     # ─── Phase 5: Jules AI Dispatch (with codebase context injection) ───
     async def dispatch_to_jules(self, task_type: str, plan: str, context: str = "") -> str:
         await self.broadcast_state("jules_dispatching", {"label": f"Jules AI: {task_type.upper()} via MCPs..."})
+        started = time.perf_counter()
+        ram_before = self.telemetry.current_rss()
+        success = False
+        error = None
 
-        # AUTO-INJECT: Find relevant codebase files to give Jules perfect context
-        await self.broadcast_state("code_matrix", {"label": "Indexing relevant files for Jules..."})
-        code_context = repo.get_relevant_context(plan[:200])
-        enriched_context = f"{context}\n\n### LIVE CODEBASE CONTEXT:\n{code_context}"
+        try:
+            # AUTO-INJECT: Find relevant codebase files to give Jules perfect context
+            await self.broadcast_state("code_matrix", {"label": "Indexing relevant files for Jules..."})
+            code_context = repo.get_relevant_context(plan[:200])
+            enriched_context = f"{context}\n\n### LIVE CODEBASE CONTEXT:\n{code_context}"
 
-        result = await jules.dispatch_task(task_type, plan, enriched_context)
+            result = await jules.dispatch_task(task_type, plan, enriched_context)
 
-        if result.get("success"):
-            task_id = result.get("task_id", "N/A")
-            await self.broadcast_state("reflecting", {"label": f"Waiting on Jules AI (Task: {task_id})..."})
-            
-            # Polling for completion
-            status_data = await jules.poll_status(task_id, max_attempts=12, interval=15.0)
-            final_status = status_data.get("status", "unknown")
-            
-            # Verification Step
-            repo_status = repo.get_git_status()
-            prs = repo.list_open_prs()
-            
-            return (
-                f"🟢 Jules Task '{task_type}' finished with status: [{final_status}]\n\n"
-                f"### Output Logs:\n{status_data.get('message', 'No details.')}\n\n"
-                f"### Auto-Verification (Git):\n{repo_status}\n\n"
-                f"### Open PRs:\n{prs}"
-            )
-        else:
+            if result.get("success"):
+                task_id = result.get("task_id", "N/A")
+                await self.broadcast_state("reflecting", {"label": f"Waiting on Jules AI (Task: {task_id})..."})
+                
+                # Polling for completion
+                status_data = await jules.poll_status(task_id, max_attempts=12, interval=15.0)
+                final_status = status_data.get("status", "unknown")
+                success = True
+                
+                # Verification Step
+                repo_status = repo.get_git_status()
+                prs = repo.list_open_prs()
+                
+                return (
+                    f"🟢 Jules Task '{task_type}' finished with status: [{final_status}]\n\n"
+                    f"### Output Logs:\n{status_data.get('message', 'No details.')}\n\n"
+                    f"### Auto-Verification (Git):\n{repo_status}\n\n"
+                    f"### Open PRs:\n{prs}"
+                )
             msg = result.get("message", "Unknown error")
+            error = msg
             preview = json.dumps(result.get("payload_preview", {}), indent=2)[:500]
             return f"⚠️ Jules dispatch status: {msg}\n\nPayload (for manual review):\n{preview}"
+        except Exception as exc:
+            error = str(exc)
+            return f"⚠️ Jules dispatch error: {exc}"
+        finally:
+            self.telemetry.log_action(
+                action="dispatch_to_jules",
+                agent="jules",
+                success=success,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                ram_before=ram_before,
+                ram_after=self.telemetry.current_rss(),
+                error=error,
+            )
 
     # ─── Phase 6: Web Search (Zero Dependency) ───
     async def search_web(self, query: str) -> str:
         await self.broadcast_state("reflecting", {"label": f"Searching Web: {query}"})
+        started = time.perf_counter()
+        ram_before = self.telemetry.current_rss()
+        success = False
+        error = None
         try:
             url = "https://html.duckduckgo.com/html/"
             payload = {'q': query}
             headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/100.0'}
             resp = requests.post(url, data=payload, headers=headers, timeout=10)
             if resp.status_code != 200:
+                error = f"HTTP {resp.status_code}"
                 return f"No search results found (HTTP {resp.status_code})"
                 
             html = resp.text
@@ -291,10 +394,21 @@ class MetaManager:
             for s in snippets[:3]:
                 clean_text = re.sub(r'<[^>]+>', '', s).strip()
                 formatted.append(f"- {clean_text}")
-                
+            success = True
             return f"🌐 Web Search Results for '{query}':\n" + "\n\n".join(formatted)
         except Exception as e:
+            error = str(e)
             return f"Search error: {e}"
+        finally:
+            self.telemetry.log_action(
+                action="search_web",
+                agent="meta_manager",
+                success=success,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                ram_before=ram_before,
+                ram_after=self.telemetry.current_rss(),
+                error=error,
+            )
 
     # ─── Phase 7: Analyze Chat History Logs ───
     async def analyze_chat_logs(self, query: str = "") -> str:
