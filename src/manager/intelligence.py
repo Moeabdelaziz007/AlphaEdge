@@ -137,8 +137,42 @@ class AlphaManagerAI:
             "- We have a Predictive Watcher daemon monitoring file changes and blast radius.\n"
             "- We run locally on Apple Metal. Optimize for low memory overhead."
         )
-        # Session Isolation: Store multiple histories
         self.sessions = {}
+        self._load_prompts_from_db()
+
+    def _load_prompts_from_db(self):
+        """Loads mutated system prompts from SQLite."""
+        try:
+            import sqlite3
+            db_path = os.path.join(project_root, "data", "db", "memory.sqlite")
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.execute("SELECT content FROM mutated_prompts WHERE name = 'alpha_manager' ORDER BY id DESC LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    self.system_prompt = row[0]
+                    console.print("[green]🧬 Self-Evolved Prompt Loaded from DB.[/green]")
+        except Exception:
+            pass
+
+    async def _reflect_and_mutate(self, result: str, session_id: str):
+        """Background task for self-critique."""
+        if session_id == "system": return # Don't reflect on reflections
+        
+        try:
+            # Simple heuristic score (in a real system, ask Groq to score it)
+            score = 1.0
+            if "Error" in result or "Failed" in result or "⚠️" in result:
+                score = 0.2
+            
+            from src.core.daemons import ReflectionEngine
+            engine = ReflectionEngine()
+            engine.log_reflection(session_id, f"Outcome Analysis: {result[:200]}", score)
+            
+            if score < 0.5:
+                # Potential mutation trigger
+                console.print(f"[yellow]🧬 Performance drop detected in {session_id}. Reflection logged.[/yellow]")
+        except Exception:
+            pass
 
     def _get_history(self, session_id: str) -> list:
         if session_id not in self.sessions:
@@ -223,10 +257,12 @@ class AlphaManagerAI:
                     require_high_capability=require_high
                 )
                 output = final_response.choices[0].message.content
-            else:
-                output = response_message.content or "No response from AI."
+            output = response_message.content or "No response from AI."
                 
             history.append({"role": "assistant", "content": output})
+            # Trigger autonomous reflection
+            asyncio.create_task(self._reflect_and_mutate(output, session_id))
+            
             self._prune_history(session_id)
             return str(output)
             

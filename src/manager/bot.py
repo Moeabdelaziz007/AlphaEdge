@@ -39,6 +39,7 @@ async def post_init(application):
         BotCommand("tree", "Browse repo: /tree [path]"),
         BotCommand("analyze", "Code search: /analyze <query>"),
         BotCommand("search", "Web search: /search <query>"),
+        BotCommand("merge", "Approve & Merge PR: /merge <ID>"),
         BotCommand("logs", "Read recent chat logs"),
     ]
     await application.bot.set_my_commands(commands)
@@ -163,9 +164,25 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = await update.message.reply_text("📜 Reading memory logs...")
-    resp = await ai_manager.process_request("read the chat logs")
     await _safe_send(msg, update, resp)
+
+
+async def handle_merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /merge <PR_NUMBER>")
+        return
+    
+    pr_id = context.args[0]
+    msg = await update.message.reply_text(f"🐙 Attempting to merge PR #{pr_id}...")
+    
+    try:
+        res = github.merge_pr(int(pr_id))
+        if res["ok"]:
+            await msg.edit_text(f"✅ PR #{pr_id} merged into main. Deployment cycle triggered.")
+        else:
+            await msg.edit_text(f"❌ Merge failed: {res['error']}")
+    except Exception as e:
+        await msg.edit_text(f"⚠️ Error: {e}")
 
 
 # ---------------------------------------------------------
@@ -229,6 +246,33 @@ async def run_defi_challenger(context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         print(f"⚠️ DeFi Challenger Error: {e}")
+
+
+async def run_curiosity_loop(context: ContextTypes.DEFAULT_TYPE):
+    """
+    The Idle Learner: Scans repo and suggests refactors during idle time.
+    """
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not chat_id: return
+    
+    try:
+        from src.core.daemons import CuriosityDaemon
+        from src.core.github_bridge import RepoManager
+        
+        repo = RepoManager()
+        daemon = CuriosityDaemon(repo)
+        
+        print("🧬 Curiosity Daemon scanning for optimizations...")
+        report = await daemon.hunt_for_improvements()
+        
+        if report:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"🧬 **Neural Curiosity Update**\n\n{report}\n\nReviewing logic in background...",
+                parse_mode="Markdown"
+            )
+    except Exception as e:
+        print(f"⚠️ Curiosity Daemon Error: {e}")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -362,6 +406,7 @@ def run_manager_daemon():
     app.add_handler(CommandHandler("tree", handle_tree))
     app.add_handler(CommandHandler("analyze", handle_analyze))
     app.add_handler(CommandHandler("search", handle_search))
+    app.add_handler(CommandHandler("merge", handle_merge))
     app.add_handler(CommandHandler("logs", handle_logs))
 
     # Message handlers
@@ -376,10 +421,13 @@ def run_manager_daemon():
         job_queue.run_repeating(heartbeat_routine, interval=3600, first=15)
         # Income Generation Protocol: Run every 6 hours, starting 30 seconds after boot
         job_queue.run_repeating(run_defi_challenger, interval=21600, first=30)
+        # Curiosity Daemon: Run every 12 hours (Idle learning)
+        job_queue.run_repeating(run_curiosity_loop, interval=43200, first=60)
         
         print("📊 Daily report scheduled for 09:00 AM.")
         print("🫀 Background Heartbeat (Cron) Loop Active.")
         print("💸 DeFi Challenger (Income Protocol) Active (6h interval).")
+        print("🧬 Curiosity Daemon (Self-Evolution) Active (12h interval).")
     else:
         print("⚠️ JobQueue unavailable. Heartbeat disabled.")
 
