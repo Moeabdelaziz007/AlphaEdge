@@ -14,8 +14,6 @@ class EdgeSpeaker:
     """
     def __init__(self):
         console.print("[dim]Attaching to VibeVoice-compliant TTS architecture...[/dim]")
-        # Placeholder for VibeVoice Diffusion Pipeline loading:
-        # self.vibe_pipeline = DiffusionPipeline.from_pretrained(...)
 
     def speak(self, text: str, sync: bool = False):
         """
