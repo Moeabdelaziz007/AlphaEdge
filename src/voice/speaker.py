@@ -3,8 +3,6 @@ import threading
 from rich.console import Console
 
 # The architecture conforms strictly to VibeVoice endpoints
-# import torch
-# from diffusers import AudioPipeline
 
 console = Console()
 
