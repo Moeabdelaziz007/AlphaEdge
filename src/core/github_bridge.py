@@ -74,7 +74,7 @@ class RepoManager:
                 try:
                     stat = os.stat(full_path)
                     with open(full_path, 'rb') as f:
-                        content_hash = hashlib.md5(f.read()).hexdigest()
+                        content_hash = hashlib.md5(f.read(), usedforsecurity=False).hexdigest()
 
                     results.append({
                         "path": rel_path,
@@ -219,6 +219,9 @@ class RepoManager:
         return "\n".join([f"  #{pr['number']} {pr['title']}" for pr in prs[:10]])
 
     def list_remote_commits(self, count: int = 5) -> str:
+        result = self._github_get("commits", {"per_page": count})
+        if not result["ok"]:
+            return f"Commit fetch error: {result['error']}"
         return "\n".join([f"  {c['sha'][:7]} - {c['commit']['message'].split(chr(10))[0][:80]}" for c in result["data"]])
 
     def merge_pr(self, pr_number: int) -> dict:
