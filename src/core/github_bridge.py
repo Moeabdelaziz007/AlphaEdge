@@ -74,7 +74,7 @@ class RepoManager:
                 try:
                     stat = os.stat(full_path)
                     with open(full_path, 'rb') as f:
-                        content_hash = hashlib.md5(f.read()).hexdigest()
+                        content_hash = hashlib.sha256(f.read()).hexdigest()
 
                     results.append({
                         "path": rel_path,
