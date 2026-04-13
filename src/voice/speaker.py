@@ -1,4 +1,4 @@
-import os
+import subprocess
 import threading
 from rich.console import Console
 
@@ -22,10 +22,9 @@ class EdgeSpeaker:
         Translates text into native edge audio.
         """
         def _say():
-            # For 0-latency offline MacOS MVP verification, OS system call is perfect.
-            # Avoids blocking while maintaining architectural interface for VibeVoice tensors.
-            safe_text = str(text).replace('"', '').replace("'", "")
-            os.system(f'say "{safe_text}"')
+            # For 0-latency offline MacOS MVP verification, subprocess.run is better.
+            # Avoids shell injection (Bandit B605) while maintaining architectural interface for VibeVoice tensors.
+            subprocess.run(['say', str(text)], check=False)
             
         if sync:
             _say()
