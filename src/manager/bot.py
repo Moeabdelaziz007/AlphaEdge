@@ -164,7 +164,7 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await _safe_send(msg, update, resp)
+    await update.message.reply_text("Logs feature is currently unavailable.")
 
 
 async def handle_merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
