@@ -143,6 +143,6 @@ class MemoryLayer:
             WHERE v.embedding MATCH ? 
             ORDER BY distance 
             LIMIT ?
-        """, [self._serialize_f32(embedding), top_k]).fetchall()
+        """, [self._serialize_f32(embedding), top_k])
         
         return [row[0] for row in results]
