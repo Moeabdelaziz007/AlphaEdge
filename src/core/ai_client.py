@@ -16,14 +16,19 @@ class AIClient:
     Implements cascading model fallback when rate limits (429) occur.
     """
     
-    # Model hierarchy ordered by capability and resource cost
-    GROQ_MODELS = [
+    # Model hierarchy ordered by capability and resource cost.
+    # NOTE: mixtral-8x7b-32768 was deprecated by Groq and now returns 404; it has been removed.
+    GROQ_MODELS = (
         "llama-3.3-70b-versatile",    # Primary intelligence
-        "llama-3.1-70b-versatile",    # Fallback intelligence
         "llama-3.1-8b-instant",       # High-speed fallback
-        "mixtral-8x7b-32768",         # High context fallback
-        "gemma2-9b-it"                # Absolute last resort
-    ]
+        "gemma2-9b-it",               # Lightweight fallback
+    )
+
+    # Strict allowlist for require_high_capability=True. Only 70B+ models
+    # belong here; never widen this set to include 8B/9B variants.
+    HIGH_CAPABILITY_MODELS = (
+        "llama-3.3-70b-versatile",
+    )
 
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
@@ -41,8 +46,12 @@ class AIClient:
         """
         attempts = 0
         
-        # If high capability is required, we only use the first 2 models (70B+)
-        models_to_try = self.GROQ_MODELS[:2] if require_high_capability else self.GROQ_MODELS
+        # Use the explicit allowlist when high capability is required; otherwise
+        # walk the full cascading hierarchy. Slicing by index used to assume a
+        # specific ordering that broke when mixtral was removed.
+        models_to_try = (
+            self.HIGH_CAPABILITY_MODELS if require_high_capability else self.GROQ_MODELS
+        )
         max_attempts = len(models_to_try)
         
         while attempts < max_attempts:

@@ -40,7 +40,7 @@ async def post_init(application):
         BotCommand("analyze", "Code search: /analyze <query>"),
         BotCommand("search", "Web search: /search <query>"),
         BotCommand("merge", "Approve & Merge PR: /merge <ID>"),
-        BotCommand("logs", "Read recent chat logs"),
+        BotCommand("logs", "Show git status and recent commits"),
     ]
     await application.bot.set_my_commands(commands)
 
@@ -84,7 +84,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/tree [path] - Browse repo\n"
         "/analyze [query] - Search codebase\n"
         "/search [query] - Search the web\n"
-        "/logs - View recent AI memory\n\n"
+        "/logs - Show git status and recent commits\n\n"
         "You can also send voice messages or text."
     )
 
@@ -164,6 +164,14 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the most recent local commits and working tree status."""
+    msg = await update.message.reply_text("📜 جلب آخر التعديلات والحالة...")
+    try:
+        status = github.get_git_status()
+        log_lines = github.get_git_log(count=5)
+        resp = f"{status}\n\n{log_lines}"
+    except Exception as e:
+        resp = f"❌ تعذر قراءة سجلّ git: {e}"
     await _safe_send(msg, update, resp)
 
 

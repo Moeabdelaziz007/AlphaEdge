@@ -3,6 +3,7 @@ The Meta-Manager: AlphaEdge's Autonomous Observer Loop.
 Listen -> Reflect (Groq) -> Skill-Make (Gemini) -> Execute -> Jules Dispatch -> Reflect & Remember.
 Drives the WebSocket-powered Holographic UI and Self-Improving Memory.
 """
+import ast
 import os
 import sys
 import json
@@ -55,12 +56,19 @@ class MetaManager:
         self.ws_broadcast = None
         self.system_telemetry: list[dict] = []
         self.telemetry = TelemetryLogger(self.system_telemetry)
+        # Expose the module-level Gemini model on the instance so dependants
+        # (e.g. SaaSManager) can reach it via `self.meta.gemini_model`.
+        self.gemini_model = gemini_model
         self.conversation = [
             {"role": "system", "content": (
                 "You are AlphaEdge's Meta-Manager, an autonomous 10x architect. "
                 "You have these actions available:\n"
                 "1. {\"action\": \"create_skill\", \"skill_name\": \"...\", \"description\": \"...\", \"python_code\": \"...\"} "
-                "- When asked to do something you lack a tool for.\n"
+                "- When asked to do something you lack a tool for. The python_code "
+                "MUST be self-contained and use ONLY the Python standard library "
+                "(no `requests`, `numpy`, internal src.* imports, etc.); it runs "
+                "inside an isolated Docker sandbox without project dependencies. "
+                "Skills must define a top-level `run()` function returning a str.\n"
                 "2. {\"action\": \"execute_skill\", \"skill_name\": \"...\"} "
                 "- When a matching skill already exists.\n"
                 "3. {\"action\": \"dispatch_jules\", \"task_type\": \"ui|database|deployment|tracking|docs|general\", "
@@ -175,7 +183,32 @@ class MetaManager:
         error = None
 
         try:
+            # Reject anything that isn't a plain Python identifier. The
+            # skill_name flows in from a model response (decision.get(...))
+            # and is concatenated into a filesystem path; without this gate
+            # values like "../../../etc/passwd" or "/root/.ssh/id_rsa" would
+            # cause os.path.join to escape SKILLS_DIR and write arbitrary
+            # files on the host, which are then mounted into Docker.
+            if not isinstance(skill_name, str) or not re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]{0,63}", skill_name
+            ):
+                error = "invalid skill_name"
+                return (
+                    f"❌ Skill rejected: 'skill_name' must be a Python identifier "
+                    "(letters, digits, underscores; up to 64 chars; cannot start with a digit)."
+                )
+
+            # Defence in depth: even after the regex check, confirm the joined
+            # path stays inside SKILLS_DIR.
             skill_path = os.path.join(SKILLS_DIR, f"{skill_name}.py")
+            real_skills_dir = os.path.realpath(SKILLS_DIR)
+            real_skill_path = os.path.realpath(skill_path)
+            if (
+                os.path.commonpath([real_skills_dir, real_skill_path])
+                != real_skills_dir
+            ):
+                error = "skill_path escapes SKILLS_DIR"
+                return f"❌ Skill '{skill_name}' rejected: resolved path escapes the skills directory."
 
             # Enrich the code with Gemini
             try:
@@ -190,6 +223,15 @@ class MetaManager:
                 improved_code = gemini_response.text.replace("```python", "").replace("```", "").strip()
             except Exception:
                 improved_code = python_code
+
+            # Statically reject non-stdlib imports before we touch disk.
+            # The sandbox image only ships the standard library; allowing
+            # `requests` / `numpy` / `src.*` to flow through would always
+            # crash inside Docker and produce confusing errors.
+            ok, reason = self._check_stdlib_only(improved_code)
+            if not ok:
+                error = reason
+                return f"❌ Skill '{skill_name}' rejected: {reason}"
 
             # Write the skill file
             with open(skill_path, 'w') as f:
@@ -219,6 +261,48 @@ class MetaManager:
                 error=error,
             )
 
+    @staticmethod
+    def _check_stdlib_only(source: str) -> tuple[bool, str]:
+        """
+        Returns (ok, reason). False if the source imports any module that is
+        not part of the Python standard library, since the sandbox image
+        (`python:3.11-slim`) has no third-party packages installed.
+        """
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as exc:
+            return False, f"syntax error: {exc}"
+
+        stdlib = set(getattr(sys, "stdlib_module_names", ()))
+        if not stdlib:
+            # Older Python: skip the check rather than guess wrong.
+            return True, ""
+
+        offenders: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    top = alias.name.split(".", 1)[0]
+                    if top and top not in stdlib:
+                        offenders.add(top)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    offenders.add("(relative import)")
+                    continue
+                if not node.module:
+                    continue
+                top = node.module.split(".", 1)[0]
+                if top and top not in stdlib:
+                    offenders.add(top)
+
+        if offenders:
+            return False, (
+                "non-stdlib imports in generated skill: "
+                + ", ".join(sorted(offenders))
+                + ". Skills must be self-contained (stdlib only)."
+            )
+        return True, ""
+
     async def _sandbox_test(self, skill_path: str, skill_name: str) -> dict:
         """Tests a skill in Docker (if available) or subprocess fallback."""
         test_cmd = (
@@ -228,34 +312,39 @@ class MetaManager:
             f"spec.loader.exec_module(m); print(m.run())"
         )
 
-        if DOCKER_AVAILABLE:
-            try:
-                result = subprocess.run(
-                    ["docker", "run", "--rm", "-v", f"{skill_path}:/skill.py:ro",
-                     "python:3.11-slim", "python", "-c",
-                     "import importlib.util; spec = importlib.util.spec_from_file_location('s', '/skill.py'); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.run())"],
-                    capture_output=True, text=True, timeout=30
-                )
-                if result.returncode == 0:
-                    return {"success": True, "output": result.stdout}
-                return {"success": False, "error": result.stderr[:500]}
-            except Exception as e:
-                # Docker failed, fall through to subprocess
-                pass
+        if not DOCKER_AVAILABLE:
+            # Refuse to execute AI-generated code on the host. Docker isolation
+            # is mandatory; without it we mark the skill as untested rather
+            # than risk arbitrary code execution in the host process.
+            return {
+                "success": False,
+                "error": (
+                    "Docker is not available; refusing to execute AI-generated skill on "
+                    "the host. Install Docker and rerun to validate this skill."
+                ),
+            }
 
-        # Subprocess fallback
         try:
             result = subprocess.run(
-                [sys.executable, "-c", test_cmd],
-                capture_output=True, text=True, timeout=15
+                [
+                    "docker", "run", "--rm",
+                    "--network", "none",
+                    "--memory", "256m",
+                    "--cpus", "0.5",
+                    "-v", f"{skill_path}:/skill.py:ro",
+                    "python:3.11-slim", "python", "-c",
+                    "import importlib.util; spec = importlib.util.spec_from_file_location('s', '/skill.py'); "
+                    "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.run())",
+                ],
+                capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
                 return {"success": True, "output": result.stdout}
             return {"success": False, "error": result.stderr[:500]}
         except subprocess.TimeoutExpired:
-            return {"success": False, "error": "Timed out (15s)"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": "Docker sandbox timed out (30s)."}
+        except Exception as exc:
+            return {"success": False, "error": f"Docker sandbox error: {exc}"}
 
     # ─── Phase 3: Execute Existing Skill ───
     async def execute_skill(self, skill_name: str) -> str:

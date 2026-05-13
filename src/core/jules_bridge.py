@@ -4,16 +4,19 @@ Routes structured architectural tasks to the Jules AI API,
 which will execute them using its connected MCPs (v0, Linear, Neon, Render, etc).
 """
 import os
-import json
+import logging
 import asyncio
 import aiohttp
-import aiohttp
-from typing import Optional
 from dotenv import load_dotenv
 
 from src.core.github_bridge import RepoManager
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# v1alpha session states that mean the session has reached a final outcome.
+_TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED"}
 
 
 class JulesAIClient:
@@ -34,11 +37,22 @@ class JulesAIClient:
 
     def __init__(self):
         self.api_key = os.getenv("JULES_API_KEY", "")
-        self.endpoint = os.getenv("JULES_WEBHOOK_URL", "https://api.jules.ai/v1/trigger")
+        # Default to the real Jules endpoint; override via JULES_WEBHOOK_URL when needed.
+        self.endpoint = os.getenv(
+            "JULES_WEBHOOK_URL",
+            "https://jules.googleapis.com/v1alpha/sessions",
+        )
+        # The Jules v1alpha API authenticates via the x-goog-api-key header,
+        # not OAuth bearer tokens. See:
+        # https://jules.google/docs/api/reference/authentication/
         self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "x-goog-api-key": self.api_key,
+            "Content-Type": "application/json",
         }
+        # Default automation/branch settings; callers can override per-task by
+        # passing kwargs through to dispatch_task in a future iteration.
+        self.default_branch = os.getenv("JULES_STARTING_BRANCH", "main")
+        self.automation_mode = os.getenv("JULES_AUTOMATION_MODE", "AUTO_CREATE_PR")
 
     async def dispatch_task(
         self,
@@ -48,14 +62,19 @@ class JulesAIClient:
         repo: str = "Moeabdelaziz007/AlphaEdge"
     ) -> dict:
         """
-        Dispatches a structured task to the Jules AI API.
-        
+        Dispatches a structured task to the Jules v1alpha sessions API.
+
+        See https://jules.google/docs/api/reference/sessions/ for the schema.
+        The webhook-style fields the previous implementation used
+        (`instructions`, `repository`, `trigger_source`) are not part of the
+        public contract and would fail with 400 Bad Request.
+
         Args:
             task_type: One of 'ui', 'database', 'deployment', 'tracking', 'docs', 'general'
             architecture_plan: The detailed plan Gemini/Groq produced.
             context: Optional extra context (e.g., build logs, error traces).
             repo: GitHub repo slug for Jules to operate on.
-        
+
         Returns:
             Dict with 'success', 'message', and optionally 'task_id'.
         """
@@ -66,23 +85,35 @@ class JulesAIClient:
         git_status = repo_mgr.get_git_status()
         git_log = repo_mgr.get_git_log(count=3)
 
+        # Jules sessions accept a single prompt string. Fold the MCP directive,
+        # architecture plan, git state, and additional context into one
+        # well-structured message.
+        prompt = (
+            f"You are executing a task for the AlphaEdge project (repo: {repo}).\n\n"
+            f"## MCP Directive\n{mcp_instruction}\n\n"
+            f"## Architecture Plan\n{architecture_plan}\n\n"
+            f"## Current Working Tree Status\n{git_status}\n\n"
+            f"## Recent Local Commits\n{git_log}\n\n"
+            f"## Additional Source Context\n{context or 'None provided.'}\n\n"
+            "## Rules\n"
+            "- Write production-quality code. Remember we run locally on macOS Metal.\n"
+            "- Ensure compatibility with Three.js Holographic UI and existing Python meta_manager.\n"
+            "- Push changes to a new branch and open a PR.\n"
+            "- Do NOT duplicate code already shown in the context."
+        )
+
+        # CreateSession request schema:
+        # https://developers.google.com/jules/api/reference/rest/v1alpha/sessions
         payload = {
             "title": f"[AlphaEdge Auto-Dispatch] {task_type.upper()} Task",
-            "instructions": (
-                f"You are executing a task for the AlphaEdge project (repo: {repo}).\n\n"
-                f"## MCP Directive\n{mcp_instruction}\n\n"
-                f"## Architecture Plan\n{architecture_plan}\n\n"
-                f"## Current Working Tree Status\n{git_status}\n\n"
-                f"## Recent Local Commits\n{git_log}\n\n"
-                f"## Additional Source Context\n{context or 'None provided.'}\n\n"
-                "## Rules\n"
-                "- Write production-quality code. Remember we run locally on macOS Metal.\n"
-                "- Ensure compatibility with Three.js Holographic UI and existing Python meta_manager.\n"
-                "- Push changes to a new branch and open a PR.\n"
-                "- Do NOT duplicate code already shown in the context."
-            ),
-            "repository": repo,
-            "trigger_source": "alpha_meta_loop"
+            "prompt": prompt,
+            "sourceContext": {
+                "source": f"sources/github/{repo}",
+                "githubRepoContext": {
+                    "startingBranch": self.default_branch,
+                },
+            },
+            "automationMode": self.automation_mode,
         }
 
         if not self.api_key:
@@ -102,11 +133,19 @@ class JulesAIClient:
                 ) as resp:
                     if resp.status in (200, 201, 202):
                         data = await resp.json()
+                        # v1alpha returns the full resource name (e.g.
+                        # "sessions/12345"). Prefer that for downstream URL
+                        # construction; fall back to "sessions/{id}" if only
+                        # the bare id is present.
+                        session_name = data.get("name")
+                        if not session_name:
+                            bare_id = data.get("id")
+                            session_name = f"sessions/{bare_id}" if bare_id else None
                         return {
                             "success": True,
                             "message": f"Jules accepted task: {task_type}",
-                            "task_id": data.get("id", "unknown"),
-                            "status": data.get("status", "queued")
+                            "task_id": session_name or "unknown",
+                            "state": data.get("state", "QUEUED"),
                         }
                     else:
                         body = await resp.text()
@@ -128,24 +167,68 @@ class JulesAIClient:
 
     async def poll_status(self, task_id: str, max_attempts: int = 10, interval: float = 30.0) -> dict:
         """
-        Polls the Jules API for task completion status.
-        Uses exponential-ish backoff.
+        Polls the Jules v1alpha sessions API for task completion.
+
+        `task_id` should be the full resource name returned by `dispatch_task`
+        (e.g. "sessions/12345"). The v1alpha endpoint is
+        `GET /v1alpha/sessions/{name}` with no `/status` suffix; completion is
+        signalled via the `state` field (COMPLETED / FAILED / CANCELLED).
+
+        Returns the final session resource on success, or a dict with
+        `"state": "TIMEOUT"` / `"ERROR"` and an `error` message otherwise.
         """
+        # Derive the sessions collection base URL from self.endpoint.
+        # `endpoint` is typically `https://jules.googleapis.com/v1alpha/sessions`;
+        # if a caller overrode it to a different path we still want the
+        # `sessions/{id}` segment appended cleanly.
+        base = self.endpoint.rstrip("/")
+        # `task_id` already starts with "sessions/" when produced by dispatch_task.
+        # Strip a duplicate prefix if the base also ends in "/sessions".
+        session_path = task_id.lstrip("/")
+        if base.endswith("/sessions") and session_path.startswith("sessions/"):
+            poll_url = f"{base[: -len('sessions')]}{session_path}"
+        else:
+            poll_url = f"{base}/{session_path}"
+
+        last_error: str | None = None
         for attempt in range(max_attempts):
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
-                        f"{self.endpoint}/{task_id}/status",
+                        poll_url,
                         headers=self.headers,
-                        timeout=aiohttp.ClientTimeout(total=10)
+                        timeout=aiohttp.ClientTimeout(total=10),
                     ) as resp:
                         if resp.status == 200:
                             data = await resp.json()
-                            status = data.get("status", "unknown")
-                            if status in ("completed", "failed", "cancelled"):
+                            state = data.get("state", "UNKNOWN")
+                            if state in _TERMINAL_STATES:
                                 return data
-            except Exception:
-                pass
+                            last_error = None
+                        else:
+                            body = await resp.text()
+                            last_error = f"HTTP {resp.status}: {body[:200]}"
+                            logger.warning(
+                                "Jules poll non-200 (attempt %d/%d): %s",
+                                attempt + 1, max_attempts, last_error,
+                            )
+            except asyncio.TimeoutError:
+                last_error = "request timed out (10s)"
+                logger.warning(
+                    "Jules poll timeout (attempt %d/%d) for %s",
+                    attempt + 1, max_attempts, poll_url,
+                )
+            except aiohttp.ClientError as exc:
+                last_error = f"network error: {exc}"
+                logger.warning(
+                    "Jules poll network error (attempt %d/%d): %s",
+                    attempt + 1, max_attempts, exc,
+                )
+
             await asyncio.sleep(interval * (1 + attempt * 0.3))
 
-        return {"status": "timeout", "message": f"Polling timed out after {max_attempts} attempts."}
+        return {
+            "state": "TIMEOUT",
+            "message": f"Polling timed out after {max_attempts} attempts.",
+            "last_error": last_error,
+        }

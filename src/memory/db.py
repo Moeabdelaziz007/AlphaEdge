@@ -126,10 +126,21 @@ class MemoryLayer:
         cursor = self.db.cursor()
         
         if not self.vec_enabled:
-            # Fallback to standard SQL text matching
+            # Fallback to standard SQL text matching.
             keywords = query.split()
-            sql_query = "SELECT content FROM documents WHERE " + " OR ".join(["content LIKE ?"] * len(keywords)) + f" LIMIT {top_k}"
-            search_params = [f"%{k}%" for k in keywords]
+            if not keywords:
+                return []
+            # Coerce top_k to a bounded int so the LIMIT clause can never be
+            # influenced by attacker-controlled formatting. The WHERE clause
+            # is composed from a fixed number of placeholders, never from
+            # user data, so this query is parameterised end-to-end.
+            limit = max(1, min(int(top_k), 100))
+            placeholders = " OR ".join(["content LIKE ?"] * len(keywords))
+            # `placeholders` is composed from a fixed literal repeated len(keywords)
+            # times; no user data flows into the SQL string itself. All variable
+            # data goes through `search_params` and the LIMIT placeholder.
+            sql_query = "SELECT content FROM documents WHERE " + placeholders + " LIMIT ?"  # nosec B608
+            search_params = [f"%{k}%" for k in keywords] + [limit]
             results = cursor.execute(sql_query, search_params).fetchall()
             return [row[0] for row in results]
             
