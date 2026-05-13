@@ -40,7 +40,7 @@ async def post_init(application):
         BotCommand("analyze", "Code search: /analyze <query>"),
         BotCommand("search", "Web search: /search <query>"),
         BotCommand("merge", "Approve & Merge PR: /merge <ID>"),
-        BotCommand("logs", "Read recent chat logs"),
+        BotCommand("logs", "Show git status and recent commits"),
     ]
     await application.bot.set_my_commands(commands)
 
@@ -84,7 +84,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/tree [path] - Browse repo\n"
         "/analyze [query] - Search codebase\n"
         "/search [query] - Search the web\n"
-        "/logs - View recent AI memory\n\n"
+        "/logs - Show git status and recent commits\n\n"
         "You can also send voice messages or text."
     )
 

@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import sys
 import threading
 from rich.console import Console
 
@@ -24,7 +25,12 @@ class EdgeSpeaker:
         """
         def _say():
             # Use the macOS `say` binary if available; otherwise no-op rather than
-            # shell out (which is a command-injection risk).
+            # shell out (which is a command-injection risk). Enforce an explicit
+            # platform check first so a stray `say` binary on Linux/Windows is
+            # never invoked.
+            if sys.platform != "darwin":
+                console.print("[dim]TTS skipped: non-macOS host.[/dim]")
+                return
             say_bin = shutil.which("say")
             if not say_bin:
                 console.print("[dim]TTS skipped: `say` binary not available on this platform.[/dim]")

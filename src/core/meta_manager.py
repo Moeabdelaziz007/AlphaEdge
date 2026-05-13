@@ -3,6 +3,7 @@ The Meta-Manager: AlphaEdge's Autonomous Observer Loop.
 Listen -> Reflect (Groq) -> Skill-Make (Gemini) -> Execute -> Jules Dispatch -> Reflect & Remember.
 Drives the WebSocket-powered Holographic UI and Self-Improving Memory.
 """
+import ast
 import os
 import sys
 import json
@@ -63,7 +64,11 @@ class MetaManager:
                 "You are AlphaEdge's Meta-Manager, an autonomous 10x architect. "
                 "You have these actions available:\n"
                 "1. {\"action\": \"create_skill\", \"skill_name\": \"...\", \"description\": \"...\", \"python_code\": \"...\"} "
-                "- When asked to do something you lack a tool for.\n"
+                "- When asked to do something you lack a tool for. The python_code "
+                "MUST be self-contained and use ONLY the Python standard library "
+                "(no `requests`, `numpy`, internal src.* imports, etc.); it runs "
+                "inside an isolated Docker sandbox without project dependencies. "
+                "Skills must define a top-level `run()` function returning a str.\n"
                 "2. {\"action\": \"execute_skill\", \"skill_name\": \"...\"} "
                 "- When a matching skill already exists.\n"
                 "3. {\"action\": \"dispatch_jules\", \"task_type\": \"ui|database|deployment|tracking|docs|general\", "
@@ -194,6 +199,15 @@ class MetaManager:
             except Exception:
                 improved_code = python_code
 
+            # Statically reject non-stdlib imports before we touch disk.
+            # The sandbox image only ships the standard library; allowing
+            # `requests` / `numpy` / `src.*` to flow through would always
+            # crash inside Docker and produce confusing errors.
+            ok, reason = self._check_stdlib_only(improved_code)
+            if not ok:
+                error = reason
+                return f"❌ Skill '{skill_name}' rejected: {reason}"
+
             # Write the skill file
             with open(skill_path, 'w') as f:
                 f.write(improved_code)
@@ -221,6 +235,48 @@ class MetaManager:
                 tokens_used=tokens_used,
                 error=error,
             )
+
+    @staticmethod
+    def _check_stdlib_only(source: str) -> tuple[bool, str]:
+        """
+        Returns (ok, reason). False if the source imports any module that is
+        not part of the Python standard library, since the sandbox image
+        (`python:3.11-slim`) has no third-party packages installed.
+        """
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as exc:
+            return False, f"syntax error: {exc}"
+
+        stdlib = set(getattr(sys, "stdlib_module_names", ()))
+        if not stdlib:
+            # Older Python: skip the check rather than guess wrong.
+            return True, ""
+
+        offenders: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    top = alias.name.split(".", 1)[0]
+                    if top and top not in stdlib:
+                        offenders.add(top)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    offenders.add("(relative import)")
+                    continue
+                if not node.module:
+                    continue
+                top = node.module.split(".", 1)[0]
+                if top and top not in stdlib:
+                    offenders.add(top)
+
+        if offenders:
+            return False, (
+                "non-stdlib imports in generated skill: "
+                + ", ".join(sorted(offenders))
+                + ". Skills must be self-contained (stdlib only)."
+            )
+        return True, ""
 
     async def _sandbox_test(self, skill_path: str, skill_name: str) -> dict:
         """Tests a skill in Docker (if available) or subprocess fallback."""
