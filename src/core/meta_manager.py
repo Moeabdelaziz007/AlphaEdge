@@ -55,6 +55,9 @@ class MetaManager:
         self.ws_broadcast = None
         self.system_telemetry: list[dict] = []
         self.telemetry = TelemetryLogger(self.system_telemetry)
+        # Expose the module-level Gemini model on the instance so dependants
+        # (e.g. SaaSManager) can reach it via `self.meta.gemini_model`.
+        self.gemini_model = gemini_model
         self.conversation = [
             {"role": "system", "content": (
                 "You are AlphaEdge's Meta-Manager, an autonomous 10x architect. "
@@ -228,34 +231,39 @@ class MetaManager:
             f"spec.loader.exec_module(m); print(m.run())"
         )
 
-        if DOCKER_AVAILABLE:
-            try:
-                result = subprocess.run(
-                    ["docker", "run", "--rm", "-v", f"{skill_path}:/skill.py:ro",
-                     "python:3.11-slim", "python", "-c",
-                     "import importlib.util; spec = importlib.util.spec_from_file_location('s', '/skill.py'); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.run())"],
-                    capture_output=True, text=True, timeout=30
-                )
-                if result.returncode == 0:
-                    return {"success": True, "output": result.stdout}
-                return {"success": False, "error": result.stderr[:500]}
-            except Exception as e:
-                # Docker failed, fall through to subprocess
-                pass
+        if not DOCKER_AVAILABLE:
+            # Refuse to execute AI-generated code on the host. Docker isolation
+            # is mandatory; without it we mark the skill as untested rather
+            # than risk arbitrary code execution in the host process.
+            return {
+                "success": False,
+                "error": (
+                    "Docker is not available; refusing to execute AI-generated skill on "
+                    "the host. Install Docker and rerun to validate this skill."
+                ),
+            }
 
-        # Subprocess fallback
         try:
             result = subprocess.run(
-                [sys.executable, "-c", test_cmd],
-                capture_output=True, text=True, timeout=15
+                [
+                    "docker", "run", "--rm",
+                    "--network", "none",
+                    "--memory", "256m",
+                    "--cpus", "0.5",
+                    "-v", f"{skill_path}:/skill.py:ro",
+                    "python:3.11-slim", "python", "-c",
+                    "import importlib.util; spec = importlib.util.spec_from_file_location('s', '/skill.py'); "
+                    "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.run())",
+                ],
+                capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
                 return {"success": True, "output": result.stdout}
             return {"success": False, "error": result.stderr[:500]}
         except subprocess.TimeoutExpired:
-            return {"success": False, "error": "Timed out (15s)"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": "Docker sandbox timed out (30s)."}
+        except Exception as exc:
+            return {"success": False, "error": f"Docker sandbox error: {exc}"}
 
     # ─── Phase 3: Execute Existing Skill ───
     async def execute_skill(self, skill_name: str) -> str:

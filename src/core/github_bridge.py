@@ -219,7 +219,16 @@ class RepoManager:
         return "\n".join([f"  #{pr['number']} {pr['title']}" for pr in prs[:10]])
 
     def list_remote_commits(self, count: int = 5) -> str:
-        return "\n".join([f"  {c['sha'][:7]} - {c['commit']['message'].split(chr(10))[0][:80]}" for c in result["data"]])
+        result = self._github_get("commits", {"per_page": count})
+        if not result["ok"]:
+            return f"Commit error: {result['error']}"
+        commits = result["data"]
+        if not commits:
+            return "No commits found."
+        return "\n".join(
+            f"  {c['sha'][:7]} - {c['commit']['message'].split(chr(10))[0][:80]}"
+            for c in commits
+        )
 
     def merge_pr(self, pr_number: int) -> dict:
         """Merges a Pull Request via GitHub REST API (Squash Merge)."""

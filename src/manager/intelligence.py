@@ -256,9 +256,10 @@ class AlphaManagerAI:
                     max_tokens=2048,
                     require_high_capability=require_high
                 )
-                output = final_response.choices[0].message.content
-            output = response_message.content or "No response from AI."
-                
+                output = final_response.choices[0].message.content or "No response from AI."
+            else:
+                output = response_message.content or "No response from AI."
+
             history.append({"role": "assistant", "content": output})
             # Trigger autonomous reflection
             asyncio.create_task(self._reflect_and_mutate(output, session_id))

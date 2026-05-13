@@ -16,13 +16,12 @@ class AIClient:
     Implements cascading model fallback when rate limits (429) occur.
     """
     
-    # Model hierarchy ordered by capability and resource cost
+    # Model hierarchy ordered by capability and resource cost.
+    # NOTE: mixtral-8x7b-32768 was deprecated by Groq and now returns 404; it has been removed.
     GROQ_MODELS = [
         "llama-3.3-70b-versatile",    # Primary intelligence
-        "llama-3.1-70b-versatile",    # Fallback intelligence
         "llama-3.1-8b-instant",       # High-speed fallback
-        "mixtral-8x7b-32768",         # High context fallback
-        "gemma2-9b-it"                # Absolute last resort
+        "gemma2-9b-it",               # Lightweight fallback
     ]
 
     def __init__(self, api_key: str = None):

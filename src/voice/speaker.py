@@ -1,4 +1,5 @@
-import os
+import shutil
+import subprocess
 import threading
 from rich.console import Console
 
@@ -22,10 +23,18 @@ class EdgeSpeaker:
         Translates text into native edge audio.
         """
         def _say():
-            # For 0-latency offline MacOS MVP verification, OS system call is perfect.
-            # Avoids blocking while maintaining architectural interface for VibeVoice tensors.
-            safe_text = str(text).replace('"', '').replace("'", "")
-            os.system(f'say "{safe_text}"')
+            # Use the macOS `say` binary if available; otherwise no-op rather than
+            # shell out (which is a command-injection risk).
+            say_bin = shutil.which("say")
+            if not say_bin:
+                console.print("[dim]TTS skipped: `say` binary not available on this platform.[/dim]")
+                return
+            try:
+                subprocess.run([say_bin, str(text)], check=False, timeout=30)
+            except subprocess.TimeoutExpired:
+                console.print("[dim]TTS timeout (30s).[/dim]")
+            except Exception as exc:
+                console.print(f"[red]TTS error: {exc}[/red]")
             
         if sync:
             _say()

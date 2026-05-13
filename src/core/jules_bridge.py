@@ -7,7 +7,6 @@ import os
 import json
 import asyncio
 import aiohttp
-import aiohttp
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -34,7 +33,11 @@ class JulesAIClient:
 
     def __init__(self):
         self.api_key = os.getenv("JULES_API_KEY", "")
-        self.endpoint = os.getenv("JULES_WEBHOOK_URL", "https://api.jules.ai/v1/trigger")
+        # Default to the real Jules endpoint; override via JULES_WEBHOOK_URL when needed.
+        self.endpoint = os.getenv(
+            "JULES_WEBHOOK_URL",
+            "https://jules.googleapis.com/v1alpha/sessions",
+        )
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"

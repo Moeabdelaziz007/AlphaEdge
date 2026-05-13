@@ -164,6 +164,14 @@ async def handle_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the most recent local commits and working tree status."""
+    msg = await update.message.reply_text("📜 جلب آخر التعديلات والحالة...")
+    try:
+        status = github.get_git_status()
+        log_lines = github.get_git_log(count=5)
+        resp = f"{status}\n\n{log_lines}"
+    except Exception as e:
+        resp = f"❌ تعذر قراءة سجلّ git: {e}"
     await _safe_send(msg, update, resp)
 
 
