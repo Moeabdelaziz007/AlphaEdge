@@ -42,10 +42,17 @@ class JulesAIClient:
             "JULES_WEBHOOK_URL",
             "https://jules.googleapis.com/v1alpha/sessions",
         )
+        # The Jules v1alpha API authenticates via the x-goog-api-key header,
+        # not OAuth bearer tokens. See:
+        # https://jules.google/docs/api/reference/authentication/
         self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
+            "x-goog-api-key": self.api_key,
+            "Content-Type": "application/json",
         }
+        # Default automation/branch settings; callers can override per-task by
+        # passing kwargs through to dispatch_task in a future iteration.
+        self.default_branch = os.getenv("JULES_STARTING_BRANCH", "main")
+        self.automation_mode = os.getenv("JULES_AUTOMATION_MODE", "AUTO_CREATE_PR")
 
     async def dispatch_task(
         self,
@@ -55,14 +62,19 @@ class JulesAIClient:
         repo: str = "Moeabdelaziz007/AlphaEdge"
     ) -> dict:
         """
-        Dispatches a structured task to the Jules AI API.
-        
+        Dispatches a structured task to the Jules v1alpha sessions API.
+
+        See https://jules.google/docs/api/reference/sessions/ for the schema.
+        The webhook-style fields the previous implementation used
+        (`instructions`, `repository`, `trigger_source`) are not part of the
+        public contract and would fail with 400 Bad Request.
+
         Args:
             task_type: One of 'ui', 'database', 'deployment', 'tracking', 'docs', 'general'
             architecture_plan: The detailed plan Gemini/Groq produced.
             context: Optional extra context (e.g., build logs, error traces).
             repo: GitHub repo slug for Jules to operate on.
-        
+
         Returns:
             Dict with 'success', 'message', and optionally 'task_id'.
         """
@@ -73,23 +85,35 @@ class JulesAIClient:
         git_status = repo_mgr.get_git_status()
         git_log = repo_mgr.get_git_log(count=3)
 
+        # Jules sessions accept a single prompt string. Fold the MCP directive,
+        # architecture plan, git state, and additional context into one
+        # well-structured message.
+        prompt = (
+            f"You are executing a task for the AlphaEdge project (repo: {repo}).\n\n"
+            f"## MCP Directive\n{mcp_instruction}\n\n"
+            f"## Architecture Plan\n{architecture_plan}\n\n"
+            f"## Current Working Tree Status\n{git_status}\n\n"
+            f"## Recent Local Commits\n{git_log}\n\n"
+            f"## Additional Source Context\n{context or 'None provided.'}\n\n"
+            "## Rules\n"
+            "- Write production-quality code. Remember we run locally on macOS Metal.\n"
+            "- Ensure compatibility with Three.js Holographic UI and existing Python meta_manager.\n"
+            "- Push changes to a new branch and open a PR.\n"
+            "- Do NOT duplicate code already shown in the context."
+        )
+
+        # CreateSession request schema:
+        # https://developers.google.com/jules/api/reference/rest/v1alpha/sessions
         payload = {
             "title": f"[AlphaEdge Auto-Dispatch] {task_type.upper()} Task",
-            "instructions": (
-                f"You are executing a task for the AlphaEdge project (repo: {repo}).\n\n"
-                f"## MCP Directive\n{mcp_instruction}\n\n"
-                f"## Architecture Plan\n{architecture_plan}\n\n"
-                f"## Current Working Tree Status\n{git_status}\n\n"
-                f"## Recent Local Commits\n{git_log}\n\n"
-                f"## Additional Source Context\n{context or 'None provided.'}\n\n"
-                "## Rules\n"
-                "- Write production-quality code. Remember we run locally on macOS Metal.\n"
-                "- Ensure compatibility with Three.js Holographic UI and existing Python meta_manager.\n"
-                "- Push changes to a new branch and open a PR.\n"
-                "- Do NOT duplicate code already shown in the context."
-            ),
-            "repository": repo,
-            "trigger_source": "alpha_meta_loop"
+            "prompt": prompt,
+            "sourceContext": {
+                "source": f"sources/github/{repo}",
+                "githubRepoContext": {
+                    "startingBranch": self.default_branch,
+                },
+            },
+            "automationMode": self.automation_mode,
         }
 
         if not self.api_key:
