@@ -183,7 +183,32 @@ class MetaManager:
         error = None
 
         try:
+            # Reject anything that isn't a plain Python identifier. The
+            # skill_name flows in from a model response (decision.get(...))
+            # and is concatenated into a filesystem path; without this gate
+            # values like "../../../etc/passwd" or "/root/.ssh/id_rsa" would
+            # cause os.path.join to escape SKILLS_DIR and write arbitrary
+            # files on the host, which are then mounted into Docker.
+            if not isinstance(skill_name, str) or not re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]{0,63}", skill_name
+            ):
+                error = "invalid skill_name"
+                return (
+                    f"❌ Skill rejected: 'skill_name' must be a Python identifier "
+                    "(letters, digits, underscores; up to 64 chars; cannot start with a digit)."
+                )
+
+            # Defence in depth: even after the regex check, confirm the joined
+            # path stays inside SKILLS_DIR.
             skill_path = os.path.join(SKILLS_DIR, f"{skill_name}.py")
+            real_skills_dir = os.path.realpath(SKILLS_DIR)
+            real_skill_path = os.path.realpath(skill_path)
+            if (
+                os.path.commonpath([real_skills_dir, real_skill_path])
+                != real_skills_dir
+            ):
+                error = "skill_path escapes SKILLS_DIR"
+                return f"❌ Skill '{skill_name}' rejected: resolved path escapes the skills directory."
 
             # Enrich the code with Gemini
             try:
