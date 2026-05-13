@@ -147,7 +147,11 @@ class EvolutionLoop:
         if ratio <= 0 or ratio >= 1:
             raise ValueError("rollout ratio must be between 0 and 1 (exclusive)")
 
-        bucket = int(hashlib.md5(task_id.encode("utf-8")).hexdigest(), 16) % 10_000
+        # MD5 here is a uniform-bucket hash for deterministic A/B sampling,
+        # not a security primitive. Pass usedforsecurity=False to silence the
+        # CWE-327 advisory from static scanners.
+        digest = hashlib.md5(task_id.encode("utf-8"), usedforsecurity=False).hexdigest()
+        bucket = int(digest, 16) % 10_000
         return bucket < int(ratio * 10_000)
 
     def evaluate_and_record(

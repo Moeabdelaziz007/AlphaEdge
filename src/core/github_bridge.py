@@ -74,7 +74,12 @@ class RepoManager:
                 try:
                     stat = os.stat(full_path)
                     with open(full_path, 'rb') as f:
-                        content_hash = hashlib.md5(f.read()).hexdigest()
+                        # MD5 is used here purely as a content fingerprint for
+                        # change detection across scans, not for any security
+                        # decision. usedforsecurity=False silences the scanner.
+                        content_hash = hashlib.md5(
+                            f.read(), usedforsecurity=False
+                        ).hexdigest()
 
                     results.append({
                         "path": rel_path,
